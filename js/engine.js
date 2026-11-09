@@ -86,9 +86,19 @@ export function nextMoneyDay(state, t) {
 export function periodEnd(state, t) {
   const nm = nextMoneyDay(state, t);
   if (nm) return addDays(nm, -1) < t ? t : addDays(nm, -1);
-  const until = state.settings.stretchUntil;
-  if (until && until >= t) return until;
-  return monthEnd(t);
+  // No money coming on a schedule: spread what's left until the last stretch fund's end date,
+  // or over the next 30 days, so bills early next month are still set aside.
+  let until = null;
+  for (const g of live(state.goals)) if (g.type === "stretch" && g.until && g.until >= t && (!until || g.until > until)) until = g.until;
+  return until || addDays(t, 29);
+}
+
+// Moves a past date forward along its schedule without posting anything (for dates already in the balance).
+export function rollForward(date, freq, day, t) {
+  let d = date;
+  let guard = 0;
+  while (d && d < t && guard++ < 500) d = nextDate(d, freq, day);
+  return d;
 }
 
 // Bills due after today and on or before `end` (today's were already auto-posted).
@@ -268,7 +278,6 @@ export function autoRun(state, t = today()) {
       const n = nextDate(b.next, b.freq, b.day);
       if (n) b.next = n;
       else b.done = true;
-      b.updatedAt = now;
     }
   }
   for (const inc of live(state.income)) {
@@ -290,7 +299,6 @@ export function autoRun(state, t = today()) {
       const n = nextDate(d, inc.freq, inc.day);
       if (n) inc.next = n;
       else inc.done = true;
-      inc.updatedAt = now;
     }
   }
   for (const g of live(state.goals)) {
@@ -298,30 +306,27 @@ export function autoRun(state, t = today()) {
     let guard = 0;
     while (g.next && g.next <= t && guard++ < 120) {
       const left = goalSaved(state, g.id);
-      if (left <= 0.005) { g.next = null; g.updatedAt = now; break; }
-      const amt = round2(Math.min(Number(g.perRelease) || left, left));
+      const per = Number(g.perRelease);
+      if (left <= 0.005 || !(per > 0)) break;
+      const amt = round2(Math.min(per, left));
       if (upsertTx(state, mkTx({ id: `sr:${g.id}:${g.next}`, kind: "unsave", amount: amt, goalId: g.id, note: `${g.name} release`, date: g.next, source: "auto" })))
         events.push({ type: "release", name: g.name, amount: amt, date: g.next });
       g.next = nextDate(g.next, g.freq || "weekly", g.day);
-      g.updatedAt = now;
     }
   }
-  // Round-ups: spare change from yesterday and earlier goes to the chosen goal.
+  // Round-ups: spare change from the last week's purchases goes to the chosen goal. Recomputed each run,
+  // so purchases filed late (Apple Pay inbox) still get rounded up.
   const ruGoal = state.settings.roundUpGoal && live(state.goals).find((g) => g.id === state.settings.roundUpGoal);
   if (ruGoal) {
     const from = state.settings.roundUpFrom || t;
-    let d = from;
-    let guard = 0;
-    while (d < t && guard++ < 60) {
+    for (let d = from > addDays(t, -7) ? from : addDays(t, -7); d < t; d = addDays(d, 1)) {
       let spare = 0;
       for (const tx of live(state.tx)) if (tx.date === d && isFlex(tx) && Number(tx.amount) > 0) spare += Math.ceil(Number(tx.amount) - 1e-9) - Number(tx.amount);
       spare = round2(spare);
-      if (spare > 0) upsertTx(state, mkTx({ id: `ru:${d}`, kind: "save", amount: spare, goalId: ruGoal.id, note: "Round-ups", date: d, source: "auto" }));
-      d = addDays(d, 1);
-    }
-    if (from < t) {
-      state.settings.roundUpFrom = t;
-      state.settings.updatedAt = now;
+      const id = `ru:${d}`;
+      const cur = state.tx.find((x) => x.id === id);
+      if (!cur && spare > 0) upsertTx(state, mkTx({ id, kind: "save", amount: spare, goalId: ruGoal.id, note: "Round-ups", date: d, source: "auto" }));
+      else if (cur && !cur.deleted && Math.abs((Number(cur.amount) || 0) - spare) > 0.004) { cur.amount = spare; cur.updatedAt = now; }
     }
   }
   // Remember today's allowance so the calendar can show which days stayed under.

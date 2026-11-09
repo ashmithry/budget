@@ -1,13 +1,16 @@
 // Cloud sync, end-to-end encrypted.
-// Your sync key never leaves your devices. From it we derive:
-//   token  -> identifies your cloud copy, and lets Shortcuts/widgets post spending and read the widget numbers
-//   AES key -> encrypts your full budget before upload (the server only ever sees ciphertext)
-import { get, commit, mergeStates, exportable, replaceState } from "./store.js";
-import { snapshot } from "./engine.js";
+// Your sync key never leaves your devices. From it we derive three things:
+//   sync token -> owns your cloud copy (download, upload, delete). Never shown or put in a link.
+//   link token -> goes in Shortcut / widget links. It can only add spending and read today's numbers.
+//   AES key    -> encrypts your full budget before upload (the server only ever sees ciphertext).
+import { get, commit, mergeInfo, exportable, replaceState } from "./store.js";
+import { snapshot, guessCategory, live } from "./engine.js";
+import { today } from "./dates.js";
 
 const SUPABASE = "https://uwpyztvtwubbteftflbu.supabase.co/rest/v1/rpc/";
 const SB_KEY = "sb_publishable_m3wgNay9L6q8QllOggLDuA_UMzzki49"; // publishable key: it can only call the budget_* functions
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const KEY_LEN = 20;
 
 async function rpc(fn, body) {
   const r = await fetch(SUPABASE + fn, {
@@ -20,20 +23,28 @@ async function rpc(fn, body) {
 }
 
 export function newKey() {
-  const bytes = crypto.getRandomValues(new Uint8Array(20));
+  // Rejection sampling so every character is equally likely.
   let s = "";
-  for (const b of bytes) s += ALPHABET[b % ALPHABET.length];
-  return s.match(/.{1,5}/g).join("-"); // XXXXX-XXXXX-XXXXX-XXXXX
+  while (s.length < KEY_LEN) {
+    for (const b of crypto.getRandomValues(new Uint8Array(32))) {
+      if (b < 248 && s.length < KEY_LEN) s += ALPHABET[b % ALPHABET.length];
+    }
+  }
+  return formatKey(s);
 }
 export const cleanKey = (k) => String(k || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-export const validKey = (k) => cleanKey(k).length >= 16;
+export const formatKey = (k) => cleanKey(k).match(/.{1,5}/g).join("-");
+export const validKey = (k) => {
+  const c = cleanKey(k);
+  return c.length === KEY_LEN && [...c].every((ch) => ALPHABET.includes(ch));
+};
 
 const enc = new TextEncoder();
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+const derive = async (label, key) => hex(await crypto.subtle.digest("SHA-256", enc.encode(label + cleanKey(key)))).slice(0, 40);
+export const linkTokenFor = (key) => derive("budget-token:", key);
+export const syncTokenFor = (key) => derive("budget-sync:", key);
 
-export async function tokenFor(key) {
-  return hex(await crypto.subtle.digest("SHA-256", enc.encode("budget-token:" + cleanKey(key)))).slice(0, 40);
-}
 async function aesKey(key) {
   const base = await crypto.subtle.importKey("raw", enc.encode(cleanKey(key)), "PBKDF2", false, ["deriveKey"]);
   return crypto.subtle.deriveKey({ name: "PBKDF2", salt: enc.encode("budget-vault-v1"), iterations: 150000, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
@@ -47,16 +58,15 @@ const b64 = (u8) => {
 const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 async function gz(bytes, mode) {
-  if (typeof CompressionStream === "undefined") return null;
+  if (typeof CompressionStream === "undefined" || typeof DecompressionStream === "undefined") return null;
   const stream = new Blob([bytes]).stream().pipeThrough(mode === "c" ? new CompressionStream("gzip") : new DecompressionStream("gzip"));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-let keyCache = { key: null, aes: null, token: null };
-async function keys() {
-  const k = get().meta.key;
+let keyCache = { key: null };
+async function keys(k = get().meta.key) {
   if (!k) return null;
-  if (keyCache.key !== k) keyCache = { key: k, aes: await aesKey(k), token: await tokenFor(k) };
+  if (keyCache.key !== k) keyCache = { key: k, aes: await aesKey(k), sync: await syncTokenFor(k), link: await linkTokenFor(k) };
   return keyCache;
 }
 
@@ -76,7 +86,10 @@ async function decrypt(str, aes) {
   const [head, body] = str.split(":");
   const raw = unb64(body);
   let bytes = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: raw.slice(0, 12) }, aes, raw.slice(12)));
-  if (head === "v1z") bytes = await gz(bytes, "d");
+  if (head === "v1z") {
+    bytes = await gz(bytes, "d");
+    if (!bytes) throw new Error("This browser can't unpack the cloud copy. Update iOS / your browser.");
+  }
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 
@@ -99,60 +112,82 @@ function inboxTx(row) {
     updatedAt: at,
     source: it.source === "applepay" ? "applepay" : "shortcut",
     late: h >= 22 || h < 4,
-    review: true, // shows in "Check these" on Home until you look at it
   };
 }
 
+// Files new auto-logged purchases: merchants you've categorized before are filed silently,
+// new ones wait in "Check these" on Home.
+function fileInbox(txs) {
+  for (const tx of txs) {
+    if (tx.kind !== "expense") { tx.cat = "income"; tx.review = false; continue; }
+    if (!tx.cat) tx.cat = guessCategory(get(), tx.note);
+    const name = (tx.note || "").toLowerCase();
+    const known = name && live(get().tx).some((x) => x !== tx && x.kind === "expense" && !x.review && (x.note || "").toLowerCase() === name);
+    tx.review = !known || !tx.cat;
+    if (!tx.cat) tx.cat = "other";
+  }
+}
+
 let running = null;
-export function sync(opts) {
-  if (!running) running = doSync(opts).finally(() => (running = null));
+let again = false;
+// Runs one sync at a time. A sync requested while one is running runs once more afterwards.
+export function sync() {
+  if (running) { again = true; return running; }
+  running = doSync().finally(() => {
+    running = null;
+    if (again) { again = false; sync().catch(() => {}); }
+  });
   return running;
 }
 
-async function doSync({ onInbox } = {}) {
+async function doSync() {
   const k = await keys();
   if (!k) return { ok: false, reason: "off" };
-  const s = get();
-  const pulled = await rpc("budget_pull", { p_token: k.token, p_have_rev: s.meta.rev || 0 });
-  let changed = false;
-  if (pulled.cipher && pulled.rev !== s.meta.rev) {
-    const remote = await decrypt(pulled.cipher, k.aes);
-    const merged = mergeStates(get(), remote);
+  const t = today();
+  const pulled = await rpc("budget_pull", { p_token: k.sync, p_have_rev: get().meta.rev || 0 });
+  let needPush = !get().meta.lastSync || get().meta.dirty;
+  if (pulled.cipher && pulled.rev !== get().meta.rev) {
+    const { state: merged, aWins } = mergeInfo(get(), await decrypt(pulled.cipher, k.aes));
     merged.meta = { ...get().meta, rev: pulled.rev };
-    replaceState(merged);
-    changed = true;
-  } else if (pulled.rev !== s.meta.rev) {
+    replaceState(merged, { sync: false });
+    if (aWins) needPush = true;
+  } else if (pulled.rev !== get().meta.rev) {
     get().meta.rev = pulled.rev;
+    needPush = true;
   }
   let maxSeq = 0;
   const added = [];
   for (const row of pulled.inbox || []) {
     maxSeq = Math.max(maxSeq, row.seq);
     const tx = inboxTx(row);
-    if (!(tx.amount > 0 || tx.amount < 0)) continue;
+    if (!tx.amount) continue;
     if (get().tx.some((x) => x.id === tx.id)) continue;
     get().tx.push(tx);
     added.push(tx);
   }
-  if (added.length && onInbox) onInbox(added); // lets the app auto-categorize before saving
-  if (added.length || maxSeq) changed = true;
+  fileInbox(added);
+  // A purchase from an earlier day changes what today's allowance should have been.
+  if (added.some((x) => x.date < t) && get().days) delete get().days[t];
+  if (maxSeq) needPush = true;
 
-  if (changed || get().meta.dirty || !get().meta.lastSync) {
+  if (needPush) {
     for (let attempt = 0; attempt < 3; attempt++) {
+      const gen = get().meta.gen || 0;
       const cipher = await encrypt(exportable(get()), k.aes);
-      const res = await rpc("budget_push", { p_token: k.token, p_cipher: cipher, p_base_rev: get().meta.rev || 0, p_snapshot: snapshot(get()), p_ack_seq: maxSeq });
+      const res = await rpc("budget_push", { p_token: k.sync, p_link_token: k.link, p_cipher: cipher, p_base_rev: get().meta.rev || 0, p_snapshot: snapshot(get()), p_ack_seq: maxSeq });
       if (res.ok) {
         get().meta.rev = res.rev;
-        get().meta.dirty = false;
+        // Only clear "dirty" if nothing changed while we were uploading.
+        if ((get().meta.gen || 0) === gen) get().meta.dirty = false;
         break;
       }
-      // Someone else (another device) saved first: merge their copy in and try again.
-      const again = await rpc("budget_pull", { p_token: k.token, p_have_rev: -1 });
-      if (again.cipher) {
-        const merged = mergeStates(get(), await decrypt(again.cipher, k.aes));
-        merged.meta = { ...get().meta, rev: again.rev };
-        replaceState(merged);
-      } else get().meta.rev = again.rev;
+      // Another device saved first: merge their copy in and try again.
+      const latest = await rpc("budget_pull", { p_token: k.sync, p_have_rev: -1 });
+      if (latest.cipher) {
+        const { state: merged } = mergeInfo(get(), await decrypt(latest.cipher, k.aes));
+        merged.meta = { ...get().meta, rev: latest.rev };
+        replaceState(merged, { sync: false });
+      } else get().meta.rev = latest.rev;
     }
   }
   get().meta.lastSync = Date.now();
@@ -160,19 +195,32 @@ async function doSync({ onInbox } = {}) {
   return { ok: true, added: added.length };
 }
 
-// Push just the widget numbers (cheap; after each change so the widget stays current).
-export async function pushSnapshotSoon() {
-  clearTimeout(pushSnapshotSoon.t);
-  pushSnapshotSoon.t = setTimeout(() => sync().catch((e) => console.warn("sync", e)), 1500);
+// Upload soon after a change (debounced), so the widget and other devices stay current.
+export function pushSoon() {
+  clearTimeout(pushSoon.t);
+  pushSoon.t = setTimeout(() => sync().catch((e) => console.warn("sync", e)), 1500);
+}
+
+// Link this device to an existing cloud copy. Refuses keys with no cloud copy behind them.
+export async function linkDevice(key) {
+  if (!validKey(key)) throw new Error("That key isn't complete. It's 20 letters and numbers.");
+  const k = await keys(formatKey(key));
+  const pulled = await rpc("budget_pull", { p_token: k.sync, p_have_rev: -1 });
+  if (!pulled.cipher) throw new Error("No cloud copy found for that key. Check it on your other device under Automate, Show my key.");
+  await decrypt(pulled.cipher, k.aes); // proves the key decrypts it before we switch over
+  get().meta.key = formatKey(key);
+  get().meta.rev = 0;
+  commit({ sync: false });
+  return sync();
 }
 
 export async function currentToken() {
   const k = await keys();
-  return k ? k.token : null;
+  return k ? k.link : null;
 }
 
 export async function deleteCloud() {
   const k = await keys();
   if (!k) return;
-  await rpc("budget_forget", { p_token: k.token });
+  await rpc("budget_forget", { p_token: k.sync });
 }
