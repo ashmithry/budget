@@ -12,7 +12,9 @@ export function freshState() {
     settings: {
       name: "",
       currency: "$",
-      wage: 15,
+      wage: 0,
+      payType: "",
+      taxPct: 20,
       buffer: 20,
       coolHours: 48,
       bigPurchase: 25,

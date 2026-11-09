@@ -1,7 +1,7 @@
 // Small DOM helpers: escaping, money formatting, bottom sheets, toasts, icons.
 import { get } from "./store.js";
 import { ic } from "./icons.js";
-import { DEFAULT_CATS } from "./engine.js";
+import { DEFAULT_CATS, compute } from "./engine.js";
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -22,6 +22,20 @@ export function money(n, { cents = "auto", sign = false } = {}) {
 }
 
 export const plural = (n, word, many = word + "s") => `${n} ${n === 1 ? word : many}`;
+
+// What a price really costs you. Hourly workers see hours of work; everyone else (contract, gig, no job)
+// sees it as days of their own daily budget, which is what it actually eats.
+export function costFrame(amount, st = get()) {
+  const set = st.settings;
+  const a = Math.abs(Number(amount) || 0);
+  if (!a) return "";
+  if (set.payType === "hourly" && Number(set.wage) > 0) return hoursText(a / Number(set.wage));
+  const daily = compute(st).dailyBase;
+  if (!(daily > 0)) return "";
+  const d = a / daily;
+  if (d < 1) return `${Math.max(1, Math.round(d * 100))}% of a day's budget`;
+  return `${d < 10 ? String(Math.round(d * 10) / 10) : Math.round(d)} days of your budget`;
+}
 
 export function hoursText(h) {
   if (h == null) return "";

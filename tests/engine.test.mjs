@@ -88,7 +88,7 @@ test("stretch fund releases weekly and acts like a payday", () => {
 
 test("afford check: verdicts, hours of work, and budget impact", () => {
   const t = "2026-11-09";
-  const s = base(t, { income: [{ id: "j", amount: 400, freq: "biweekly", next: "2026-11-19" }], cats: [{ id: "shopping", name: "Shopping", emoji: "🛍️", limit: 60 }] });
+  const s = base(t, { settings: { payType: "hourly", wage: 15, anchor: { amount: 500, date: t, ts: 0 } }, income: [{ id: "j", amount: 400, freq: "biweekly", next: "2026-11-19" }], cats: [{ id: "shopping", name: "Shopping", limit: 60 }] });
   assert.equal(impact(s, 20, "shopping", t).verdict, "fits");
   const r = impact(s, 90, "shopping", t);
   assert.equal(r.verdict, "tight");
@@ -202,4 +202,25 @@ test("widget: logged income raises what's left instead of counting as negative s
   const w = widgetNumbers({ snapshot: snap, pending: [{ amount: 100, kind: "income", at: noon }] }, noon);
   assert.equal(w.spentToday, 0);
   assert.equal(w.left, 60);
+});
+
+test("contract worker: no scheduled income, money lasts until the chosen date, never assumes a refill", () => {
+  const t = "2026-11-09";
+  const s = base(t, { settings: { buffer: 20, lastUntil: "2026-12-18", anchor: { amount: 500, date: t, ts: 0 } } });
+  const c = compute(s, t);
+  assert.equal(c.end, "2026-12-18");
+  assert.equal(c.daysLeft, 40);
+  assert.equal(c.dailyBase, 12);
+  assert.equal(c.scheduled, false);
+  // contract pay logged when it lands raises the daily number from then on
+  s.tx.push({ id: "pay1", kind: "income", amount: 400, date: t, ts: 5 });
+  assert.equal(compute(s, t).dailyBase, 22);
+});
+
+test("prices as days of budget unless paid hourly", () => {
+  const t = "2026-11-09";
+  const s = base(t, { settings: { wage: 15, lastUntil: "2026-11-18", buffer: 0, anchor: { amount: 500, date: t, ts: 0 } } });
+  const r = impact(s, 100, null, t);
+  assert.equal(r.hours, null);
+  assert.equal(r.budgetDays, 2);
 });

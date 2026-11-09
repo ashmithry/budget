@@ -1,11 +1,11 @@
-import { get, put, remove, runAutomation } from "../store.js";
+import { get, put, remove, runAutomation, setSettings } from "../store.js";
 import { today, addDays, diffDays, pretty, prettyIn, FREQS, PER_MONTH, dayOfMonth } from "../dates.js";
 import { compute, live, categoryMonth, categories, goalSaved, recurringMonthly, incomeMonthly, round2, uid, resisted, catById } from "../engine.js";
-import { esc, money, toast, plural, hoursText, ic, tile, catTile, catLook } from "../ui.js";
+import { esc, money, toast, plural, costFrame, ic, tile, catTile, catLook } from "../ui.js";
 
 // Older data stored an emoji; anything without an icon gets a sensible one.
 const goalIcon = (g) => g.icon || (g.type === "stretch" ? "layers" : "target");
-import { formSheet, openAfford, skipItem } from "../sheets.js";
+import { formSheet, openAfford, skipItem, openAdd } from "../sheets.js";
 
 const s = () => get();
 const freqOptions = Object.entries(FREQS);
@@ -67,10 +67,9 @@ function bills() {
   const list = live(st.bills).filter((b) => !b.done).sort((a, b) => (a.next < b.next ? -1 : 1));
   const subs = list.filter((b) => b.kind === "sub" || b.kind === "trial");
   const subsYear = round2(subs.reduce((a, b) => a + (Number(b.amount) || 0) * (PER_MONTH[b.freq] || 0) * 12, 0));
-  const wage = Number(st.settings.wage) || 0;
   return `
   <div class="card"><div class="row between"><div><div class="small muted">Every month</div><b class="num" style="font-size:24px">${money(recurringMonthly(st), { cents: false })}</b></div>
-  ${subs.length ? `<div style="text-align:right"><div class="small muted">Subscriptions per year</div><b class="num tight" style="font-size:24px">${money(subsYear, { cents: false })}</b>${wage ? `<div class="tiny faint">${hoursText(subsYear / wage)}</div>` : ""}</div>` : ""}</div>
+  ${subs.length ? `<div style="text-align:right"><div class="small muted">Subscriptions per year</div><b class="num tight" style="font-size:24px">${money(subsYear, { cents: false })}</b>${costFrame(subsYear) ? `<div class="tiny faint">${costFrame(subsYear)}</div>` : ""}</div>` : ""}</div>
   <p class="tiny faint" style="margin:8px 0 0">Bills log themselves on their due date and are set aside ahead of time, so they never eat today's number.</p></div>
   ${list.length ? `<div class="list">${list.map((b) => `<button class="item" data-act="bill" data-id="${b.id}">${b.kind === "trial" ? tile("alarm-clock", "#a0660f") : b.kind === "sub" ? tile("repeat", "#64689a") : tile("key-round", "#56625b")}<div class="main"><div class="name">${esc(b.name)}${b.paused ? `<span class="tag">paused</span>` : ""}${b.kind === "trial" ? `<span class="tag warn">trial</span>` : ""}</div><div class="meta">${b.kind === "trial" ? "Starts charging" : "Next"} ${prettyIn(b.next)}, ${FREQS[b.freq].toLowerCase()}</div></div><div class="amt num">${money(b.amount)}</div></button>`).join("")}</div>` : `<div class="card empty"><span class="empty-ic">${ic("receipt-text", { size: 26, stroke: 1.5 })}</span><div>No bills yet. Add rent, your phone, and every subscription. Seeing them all together is half the battle.</div></div>`}
   <div class="small muted" style="margin:14px 4px 8px">Quick add</div>
@@ -103,14 +102,13 @@ function editBill(id, preset = {}) {
 function subAudit() {
   const subs = live(s().bills).filter((b) => (b.kind === "sub" || b.kind === "trial") && !b.done);
   let i = 0;
-  const wage = Number(s().settings.wage) || 0;
   const step = () => {
     if (i >= subs.length) { toast("Subscription check-up done"); return; }
     const b = subs[i++];
     const yearly = round2((Number(b.amount) || 0) * (PER_MONTH[b.freq] || 0) * 12);
     formSheet({
       title: `${b.name}: keep it?`,
-      note: `<b>${money(b.amount)}</b> ${FREQS[b.freq].toLowerCase()} = <b>${money(yearly)}/year</b>${wage ? ` (${hoursText(yearly / wage)})` : ""}. Did you use it in the last 2 weeks? Would you sign up again today at this price?`,
+      note: `<b>${money(b.amount)}</b> ${FREQS[b.freq].toLowerCase()} = <b>${money(yearly)}/year</b>${costFrame(yearly) ? ` (${costFrame(yearly)})` : ""}. Did you use it in the last 2 weeks? Would you sign up again today at this price?`,
       fields: [],
       saveLabel: "Keep it",
       deleteLabel: "Cancel it",
@@ -127,9 +125,20 @@ function income() {
   const st = s();
   const list = live(st.income).filter((x) => !x.done).sort((a, b) => (a.next < b.next ? -1 : 1));
   const funds = live(st.goals).filter((g) => g.type === "stretch");
+  const c = compute(st);
+  const pct = Math.max(0, Math.min(60, Number(st.settings.taxPct) || 0));
   return `
-  ${list.length ? `<div class="list">${list.map((i) => `<button class="item" data-act="inc" data-id="${i.id}">${tile("banknote", "#2e6a47")}<div class="main"><div class="name">${esc(i.name)}</div><div class="meta">Next ${prettyIn(i.next)}, ${FREQS[i.freq].toLowerCase()}</div></div><div class="amt num pos">${money(i.amount)}</div></button>`).join("")}</div>` : `<div class="card empty"><span class="empty-ic">${ic("banknote", { size: 26, stroke: 1.5 })}</span><div>Add each way money comes in: a job, allowance, Venmo from family. Your daily number is spread out until the next one.</div></div>`}
-  <button class="btn block primary" data-act="inc-new">${ic("plus", { size: 18 })}Regular income</button>
+  <div class="card nudge-card ${c.scheduled || st.settings.lastUntil ? "ok" : "warn"}"><div class="nudge"><span class="nic">${ic("calendar-days", { size: 18 })}</span><div class="grow">
+    <div class="t">${c.scheduled ? `Next money comes ${prettyIn(addDays(c.end, 1))}` : `Your money is spread until ${pretty(c.end, { full: true })}`}</div>
+    <div class="d">${c.scheduled ? "Your daily number spreads what you have until then." : st.settings.lastUntil ? "You picked this date. Nothing is assumed to come in before it, so contract pay is a bonus until it lands." : "No end date set, so it's spread over the next 30 days. Pick a real one, like the end of the semester or when your next contract pays out."}</div>
+    ${c.scheduled ? "" : `<div class="btns"><button class="btn sm ${st.settings.lastUntil ? "ghost" : "primary"}" data-act="end-date">${st.settings.lastUntil ? "Change end date" : "Set my end date"}</button></div>`}
+  </div></div></div>
+  <div class="section-title"><span>Contract or gig pay</span></div>
+  <div class="card"><p class="small muted" style="margin:0 0 12px">Pay that varies isn't counted until it lands, so a late client never breaks your budget. When you get paid, log it here${pct > 0 ? ` and ${pct}% goes into a Taxes goal (no tax is taken out of contract pay)` : ""}.</p>
+    <button class="btn block primary" data-act="contract-pay">${ic("banknote", { size: 18 })}Log contract pay</button></div>
+  <div class="section-title"><span>Steady income</span></div>
+  ${list.length ? `<div class="list">${list.map((i) => `<button class="item" data-act="inc" data-id="${i.id}">${tile("banknote", "#2e6a47")}<div class="main"><div class="name">${esc(i.name)}</div><div class="meta">Next ${prettyIn(i.next)}, ${FREQS[i.freq].toLowerCase()}</div></div><div class="amt num pos">${money(i.amount)}</div></button>`).join("")}</div>` : `<div class="card empty"><span class="empty-ic">${ic("banknote", { size: 26, stroke: 1.5 })}</span><div>Only add money that comes on a schedule (a regular paycheck, a monthly allowance). Contract pay goes above, when it lands.</div></div>`}
+  <button class="btn block ghost" data-act="inc-new">${ic("plus", { size: 18 })}Add a steady paycheck or allowance</button>
   <div class="section-title"><span>Lump sums</span></div>
   <div class="card nudge-card warn"><div class="nudge"><span class="nic">${ic("layers", { size: 18 })}</span><div class="grow"><div class="t">Got a big amount at once?</div><div class="d">Financial aid refunds, scholarships, summer job savings, birthday money. Lump sums are easy to blow early. Turn it into a weekly paycheck to yourself that lasts until the date you choose.</div><div class="btns"><button class="btn sm primary" data-act="stretch-new">Stretch a lump sum</button></div></div></div></div>
   ${funds.length ? `<div class="list">${funds.map(fundRow).join("")}</div>` : ""}`;
@@ -300,7 +309,6 @@ export function renderWait() {
   const waiting = live(st.wish).filter((w) => w.status === "waiting").sort((a, b) => a.unlockAt - b.unlockAt);
   const done = live(st.wish).filter((w) => w.status !== "waiting").sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 30);
   const r = resisted(st);
-  const wage = Number(st.settings.wage) || 0;
   const left = (w) => {
     const ms = w.unlockAt - Date.now();
     if (ms <= 0) return "Ready to decide";
@@ -308,13 +316,34 @@ export function renderWait() {
     return h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h to go` : `${h}h to go`;
   };
   return `<header class="top"><div><h1>Waitlist</h1><div class="sub">Want it? Wait first. Most urges pass.</div></div><a class="icon-btn" href="#/plan" aria-label="Back to plan">${ic("chevron-left", { size: 22 })}</a></header>
-  <div class="card ok"><div class="row between"><div><div class="small muted">Not spent by skipping</div><b class="num" style="font-size:28px">${money(r.total)}</b></div><div style="text-align:right" class="small muted">${plural(r.n, "thing")} skipped${wage ? `<br>${hoursText(r.total / wage)} saved` : ""}</div></div></div>
-  ${waiting.length ? `<div class="list">${waiting.map((w) => `<button class="item" data-act="wish" data-id="${w.id}">${tile("hourglass", "#a0660f")}<div class="main"><div class="name">${esc(w.name)}</div><div class="meta ${w.unlockAt <= Date.now() ? "good" : ""}">${left(w)}${wage ? `, ${hoursText(w.price / wage)}` : ""}</div></div><div class="amt num">${money(w.price)}</div></button>`).join("")}</div>` : `<div class="card empty"><span class="empty-ic">${ic("shopping-bag", { size: 26, stroke: 1.5 })}</span><div>Nothing waiting. Next time you want something, tap <b>Can I afford it?</b> and choose "Wait".</div></div>`}
+  <div class="card ok"><div class="row between"><div><div class="small muted">Not spent by skipping</div><b class="num" style="font-size:28px">${money(r.total)}</b></div><div style="text-align:right" class="small muted">${plural(r.n, "thing")} skipped${r.total && costFrame(r.total) ? `<br>${costFrame(r.total)} kept` : ""}</div></div></div>
+  ${waiting.length ? `<div class="list">${waiting.map((w) => `<button class="item" data-act="wish" data-id="${w.id}">${tile("hourglass", "#a0660f")}<div class="main"><div class="name">${esc(w.name)}</div><div class="meta ${w.unlockAt <= Date.now() ? "good" : ""}">${left(w)}${costFrame(w.price) ? `, ${costFrame(w.price)}` : ""}</div></div><div class="amt num">${money(w.price)}</div></button>`).join("")}</div>` : `<div class="card empty"><span class="empty-ic">${ic("shopping-bag", { size: 26, stroke: 1.5 })}</span><div>Nothing waiting. Next time you want something, tap <b>Can I afford it?</b> and choose "Wait".</div></div>`}
   <button class="btn block primary" data-act="wish-new">${ic("plus", { size: 18 })}Add something I want</button>
   ${done.length ? `<div class="section-title"><span>Decided</span></div><div class="list">${done.map((w) => `<div class="item">${w.status === "skipped" ? tile("circle-check", "#2e6a47") : tile("shopping-bag", "#ad3d5a")}<div class="main"><div class="name">${esc(w.name)}</div><div class="meta">${w.status === "skipped" ? "Skipped" : "Bought"}${w.decidedDay ? `, ${prettyIn(w.decidedDay)}` : ""}</div></div><div class="amt num ${w.status === "skipped" ? "pos" : ""}">${money(w.price)}</div></div>`).join("")}</div>` : ""}`;
 }
 
+function endDateSheet() {
+  const cur = s().settings.lastUntil;
+  formSheet({
+    title: "Make my money last until",
+    note: "With no steady paycheck, your daily number is what you have divided by the days until this date. Contract pay you log later raises it.",
+    value: { lastUntil: cur || addDays(today(), 30) },
+    fields: [{ key: "lastUntil", label: "Last until", type: "date", required: true, help: "End of semester, next refund, or when a contract should pay out." }],
+    saveLabel: "Save end date",
+    onSave: (v) => {
+      if (v.lastUntil <= today()) { toast("Pick a date after today"); return false; }
+      setSettings({ lastUntil: v.lastUntil });
+      toast(`Spread until ${pretty(v.lastUntil, { full: true })}`);
+    },
+    onDelete: cur ? () => setSettings({ lastUntil: null }) : null,
+    deleteLabel: "Clear end date (use 30 days)",
+    confirmDelete: false,
+  });
+}
+
 export const planActions = {
+  "end-date": () => endDateSheet(),
+  "contract-pay": () => openAdd({ kind: "income", contract: true, note: "" }),
   cat: (el) => editCat(el.dataset.id),
   "cat-new": () => editCat(null),
   bill: (el) => editBill(el.dataset.id),

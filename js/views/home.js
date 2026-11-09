@@ -49,7 +49,7 @@ function nudges(c) {
     out.push(nudge("ok", "banknote", `Payday: ${money(p.amount)} from ${esc(p.note)}`, `Logged automatically${saved.length ? `, and ${saved.map((x) => `${money(x.amount)} went to ${esc(x.note.replace("Auto-save → ", ""))}`).join(", ")} first` : ""}. Got a different amount?`, `<button class="btn sm ghost" data-act="edit-pay" data-id="${esc(p.id)}">Fix amount</button><button class="btn sm good" data-act="seen" data-id="${esc(p.id)}">Looks right</button>`));
   }
   // 3. state-of-the-day coaching
-  if (c.status === "short") out.push(nudge("bad", "triangle-alert", `You're ${money(-c.pool)} short until ${pretty(addDays(c.end, 1))}`, "Bills coming up need more than you have. Pause anything optional and check whether a bill can move. If the number looks wrong, match your bank balance.", `<button class="btn sm ghost" data-act="balance">Match my bank</button>`));
+  if (c.status === "short") out.push(nudge("bad", "triangle-alert", `You're ${money(-c.pool)} short ${c.scheduled ? `until ${pretty(addDays(c.end, 1))}` : `for bills before ${pretty(c.end)}`}`, "Bills coming up need more than you have. Pause anything optional and check whether a bill can move. If the number looks wrong, match your bank balance.", `<button class="btn sm ghost" data-act="balance">Match my bank</button>`));
   else if (c.status === "over") out.push(nudge("bad", "trending-down", `Over today's limit by ${money(-c.leftToday)}`, `It's spread across the rest of the week: every day until ${pretty(c.end)} is now ${money(c.tomorrowDaily ?? 0)}. A no-spend day tomorrow gets you back on track.`));
   // 4. waitlist items ready to decide
   const ready = live(st.wish).filter((w) => w.status === "waiting" && w.unlockAt <= Date.now());
@@ -76,7 +76,7 @@ function nudges(c) {
     out.push(nudge("warn", catLook(h).icon, `${esc(h.name)}: ${h.state === "over" ? `${money(h.spent - h.limit)} over this month` : `${money(h.spent)} of ${money(h.limit)} already`}`, h.state === "over" ? "Anything more here comes out of your other plans." : `On pace for ${money(h.projected)} by month end. Go easy on this one for a few days.`));
   }
   // 9. setup prompts
-  if (!live(st.income).length && !live(st.goals).some((g) => g.type === "stretch")) out.push(nudge("info", "calendar-plus", "When do you get money next?", "Add a paycheck, allowance or a lump sum (like a financial aid refund) so the daily number spreads it out correctly.", `<a class="btn sm primary" href="#/plan/income">Add income</a>`));
+  if (!c.scheduled && !st.settings.lastUntil) out.push(nudge("info", "calendar-plus", "How long does this money need to last?", `Right now it's spread over the next 30 days. If nothing steady is coming in (contract or gig pay, or no job right now), pick your own end date, like the end of the semester. Contract pay only counts once it lands.`, `<a class="btn sm primary" href="#/plan/income">Set my end date</a>`));
   if (!st.meta.key && !st.settings.hideAutoTip) out.push(nudge("info", "credit-card", "Log purchases automatically", "Every Apple Pay tap can log itself, and a widget can show today's number on your home and lock screen.", `<a class="btn sm primary" href="#/automate">Set it up</a><button class="btn sm ghost" data-act="hide-auto">Later</button>`));
   return out.join("");
 }
@@ -95,7 +95,7 @@ export function renderHome() {
   const [cur, num] = [amt.match(/^[^\d]+/)?.[0] || "", amt.replace(/^[^\d]+/, "")];
   const waiting = live(st.wish).filter((w) => w.status === "waiting");
   const pct = c.status === "over" || c.status === "short" ? 100 : Math.round(Math.max(0, Math.min(1, frac)) * 100);
-  const daysTxt = c.daysLeft === 1 ? "Last day before money comes in" : `${c.daysLeft} days to payday`;
+  const daysTxt = c.scheduled ? (c.daysLeft === 1 ? "Last day before money comes in" : `${c.daysLeft} days to payday`) : `${plural(c.daysLeft, "day")} left`;
   const line =
     c.status === "short" ? `Bills before ${pretty(addDays(c.end, 1))} need more than you have.`
     : c.status === "over" ? `Every day until ${pretty(c.end)} drops to ${money(c.tomorrowDaily ?? 0)}.`
@@ -107,12 +107,12 @@ export function renderHome() {
     <div class="row" style="gap:8px"><a class="icon-btn" href="#/automate" aria-label="Automations and widgets">${icon("bolt")}</a><a class="icon-btn" href="#/settings" aria-label="Settings">${icon("gear")}</a></div>
   </header>
   <section class="hero ${c.status}" aria-live="polite">
-    <div class="hero-top"><span class="label">${c.status === "short" ? "Short before payday" : c.status === "over" ? "Over today's limit" : "Safe to spend today"}</span><span class="days">${daysTxt}</span></div>
+    <div class="hero-top"><span class="label">${c.status === "short" ? (c.scheduled ? "Short before payday" : "Short for upcoming bills") : c.status === "over" ? "Over today's limit" : "Safe to spend today"}</span><span class="days">${daysTxt}</span></div>
     <div class="big num">${big < 0 ? "−" : ""}<small>${esc(cur.replace("−", ""))}</small>${esc(num)}</div>
     <div class="gauge" role="img" aria-label="${c.status === "over" || c.status === "short" ? "Over the limit" : `${pct}% of today's money left`}"><i style="width:${pct}%"></i></div>
     <div class="line">${line}</div>
     <div class="facts">
-      ${c.status === "short" ? "" : `<span><b class="num">${money(Math.max(c.pool, 0), { cents: false })}</b> left until ${c.daysLeft > 1 ? pretty(addDays(c.end, 1)).replace(/^\w+, /, "") : "tomorrow"}</span>`}
+      ${c.status === "short" ? "" : `<span><b class="num">${money(Math.max(c.pool, 0), { cents: false })}</b> ${c.scheduled ? `left until ${c.daysLeft > 1 ? pretty(addDays(c.end, 1)).replace(/^\w+, /, "") : "tomorrow"}` : `to last through ${pretty(c.end).replace(/^\w+, /, "")}`}</span>`}
       ${c.upcomingTotal > 0 ? `<span><b class="num">${money(c.upcomingTotal, { cents: false })}</b> in bills set aside</span>` : ""}
     </div>
   </section>

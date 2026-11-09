@@ -1,6 +1,6 @@
 // First-run setup: balance, income, bills, habits. About 2 minutes, every step skippable.
 import { get, put, setSettings, runAutomation } from "../store.js";
-import { today, addDays, diffDays, FREQS, dayOfMonth } from "../dates.js";
+import { today, addDays, diffDays, FREQS, dayOfMonth, pretty } from "../dates.js";
 import { compute, uid, round2, rollForward } from "../engine.js";
 import { esc, money, toast, ic, tile, chip, nudge } from "../ui.js";
 import { automateActions } from "./settings.js";
@@ -13,7 +13,9 @@ const o = {
   incomes: [],
   lump: null,
   bills: [],
-  wage: "15",
+  wage: "",
+  payType: "",
+  lastUntil: "",
   cool: 48,
   goal: { name: "Emergency fund", target: "500", perPay: "" },
 };
@@ -39,8 +41,12 @@ export function renderOnboard() {
     <label class="f"><span>Your first name (optional)</span><input class="in" id="nm" value="${esc(o.name)}" maxlength="30"></label>
     <div class="foot"><button class="btn primary block" data-ob="next">Next</button></div></div>`;
   if (st === 2) return `<div class="onb">${dots()}
-    <h1>How does money come in?</h1>
-    <p class="lead">Your daily number is spread out until the next time you get money. Add what's regular, plus any lump sum you need to make last.</p>
+    <h1>How do you get money?</h1>
+    <p class="lead">We only count money once it's real. Pay that varies is never assumed in advance.</p>
+    <div class="chips" style="margin-bottom:14px">${[["contract", "banknote", "Contract or gig work"], ["hourly", "clock", "Hourly job"], ["none", "book-open", "Not working right now"]].map(([k, icn, l]) => chip(icn, l, o.payType === k, `data-ob="pay" data-p="${k}"`)).join("")}</div>
+    ${o.payType === "hourly" ? `<label class="f"><span>Hourly pay (optional)</span><div class="in-money" data-cur="${cur()}"><input class="in num" id="wage" inputmode="decimal" placeholder="e.g. 16" value="${esc(o.wage)}"></div><div class="tiny faint" style="margin:4px">Adds "hours of work" to prices, so a $60 hoodie shows as 4 hours at $15/hr.</div></label>` : ""}
+    ${o.incomes.length || o.lump ? "" : `<label class="f"><span>Make my money last until</span><input class="in" type="date" id="lastuntil" value="${esc(o.lastUntil || addDays(today(), 30))}"><div class="tiny faint" style="margin:4px">End of semester, or when you're sure more money arrives. Your daily number spreads what you have until then. Contract pay raises it once you log it.</div></label>`}
+    <div class="small muted" style="margin:6px 4px 8px;font-weight:600">Anything that arrives on a fixed schedule?</div>
     ${o.incomes.map((i, n) => `<div class="card"><div class="row between" style="margin-bottom:8px"><b>${esc(i.name)}</b><button class="small over" data-ob="inc-del" data-i="${n}">Remove</button></div>
       <div class="two"><div class="in-money" data-cur="${cur()}"><input class="in num" data-inc="${n}" data-k="amount" inputmode="decimal" placeholder="Amount" value="${esc(i.amount)}"></div>${freqSel(i.freq, `data-inc="${n}" data-k="freq"`)}</div>
       <label class="f" style="margin:8px 0 0"><span>Next one arrives</span><input class="in" type="date" data-inc="${n}" data-k="next" value="${i.next}"></label></div>`).join("")}
@@ -49,11 +55,11 @@ export function renderOnboard() {
       <label class="f" style="margin:8px 0 0"><span>Make it last until</span><input class="in" type="date" data-lump="until" value="${o.lump.until}"></label>
       <label class="switch" style="margin:8px 0 0;box-shadow:none;background:var(--sunk)"><span class="small">Already included in the amount on the last screen</span><input type="checkbox" data-lump="inBalance" ${o.lump.inBalance ? "checked" : ""}></label></div>` : ""}
     <div class="chips">
-      ${chip("plus", "Paycheck", false, `data-ob="inc-add" data-name="Job" data-freq="biweekly"`)}
+      ${chip("plus", "Regular paycheck", false, `data-ob="inc-add" data-name="Job" data-freq="biweekly"`)}
       ${chip("plus", "Money from family", false, `data-ob="inc-add" data-name="From family" data-freq="monthly"`)}
       ${o.lump ? "" : chip("plus", "Aid refund or scholarship", false, `data-ob="lump-add"`)}
     </div>
-    <div class="foot"><button class="btn primary block" data-ob="next">${o.incomes.length || o.lump ? "Next" : "Skip for now"}</button><button class="btn ghost block" data-ob="back">Back</button></div></div>`;
+    <div class="foot"><button class="btn primary block" data-ob="next">Next</button><button class="btn ghost block" data-ob="back">Back</button></div></div>`;
   if (st === 3) return `<div class="onb">${dots()}
     <h1>Bills & subscriptions</h1>
     <p class="lead">These get set aside before your daily number, and log themselves on the due date. Add all of them. Small subscriptions add up.</p>
@@ -65,7 +71,6 @@ export function renderOnboard() {
   if (st === 4) return `<div class="onb">${dots()}
     <h1>Your anti-impulse settings</h1>
     <p class="lead">Small speed bumps that make spending feel real again.</p>
-    <label class="f"><span>What you earn per hour (or would)</span><div class="in-money" data-cur="${cur()}"><input class="in num" id="wage" inputmode="decimal" value="${esc(o.wage)}"></div><div class="tiny faint" style="margin:4px">Prices get shown as hours of your life. $60 = ${o.wage > 0 ? Math.round((60 / o.wage) * 10) / 10 : "?"} hours.</div></label>
     <div class="small muted" style="margin:0 4px 8px;font-weight:600">Before buying things you want, wait…</div>
     <div class="chips" style="margin-bottom:16px">${[24, 48, 72].map((h) => `<button class="chip-btn ${o.cool === h ? "on" : ""}" data-ob="cool" data-h="${h}">${h} hours</button>`).join("")}</div>
     <div class="card"><b class="row" style="gap:10px">${tile("life-buoy", "#55589c")}Start a savings goal</b><p class="small muted" style="margin:4px 0 10px">Saved automatically each payday, before you can spend it.</p>
@@ -76,7 +81,7 @@ export function renderOnboard() {
   return `<div class="onb">${dots()}
     <div class="welcome" style="margin-top:6vh">
     <h1>You can safely spend <span class="good">${money(Math.max(0, c.leftToday))}</span> today.</h1>
-    <p class="lead">That's ${money(c.dailyBase)} a day until ${c.daysLeft > 1 ? "your next money day" : "tomorrow"}${c.upcomingTotal ? `, after setting aside ${money(c.upcomingTotal)} for bills` : ""}. Spend less today and tomorrow's number goes up. Go over and it goes down.</p>
+    <p class="lead">That's ${money(c.dailyBase)} a day ${c.scheduled ? (c.daysLeft > 1 ? "until your next money day" : "until tomorrow") : `through ${pretty(c.end, { full: true })}`}${c.upcomingTotal ? `, after setting aside ${money(c.upcomingTotal)} for bills` : ""}. Spend less today and tomorrow's number goes up. Go over and it goes down.</p>
     ${nudge("info", "credit-card", "One more thing", "Turn on sync to log Apple Pay taps automatically and put this number on your home and lock screen.")}</div>
     <div class="foot"><button class="btn primary block" data-ob="auto">Set up automation</button><button class="btn ghost block" data-ob="done">Maybe later</button></div></div>`;
 }
@@ -87,7 +92,8 @@ function readInputs(root) {
   root.querySelectorAll("[data-inc]").forEach((i) => (o.incomes[i.dataset.inc][i.dataset.k] = i.value));
   root.querySelectorAll("[data-lump]").forEach((i) => (o.lump[i.dataset.lump] = i.type === "checkbox" ? i.checked : i.value));
   root.querySelectorAll("[data-bill]").forEach((i) => (o.bills[i.dataset.bill][i.dataset.k] = i.value));
-  if (o.step === 4) { o.wage = v("#wage") ?? o.wage; o.goal.name = v("#gname") ?? o.goal.name; o.goal.target = v("#gtarget") ?? o.goal.target; o.goal.perPay = v("#gper") ?? o.goal.perPay; }
+  if (o.step === 2) { o.wage = v("#wage") ?? o.wage; o.lastUntil = v("#lastuntil") ?? o.lastUntil; }
+  if (o.step === 4) { o.goal.name = v("#gname") ?? o.goal.name; o.goal.target = v("#gtarget") ?? o.goal.target; o.goal.perPay = v("#gper") ?? o.goal.perPay; }
 }
 
 const n = (x) => round2(parseFloat(String(x).replace(/[^\d.-]/g, "")) || 0);
@@ -96,7 +102,8 @@ function finish() {
   const t = today();
   const now = Date.now();
   // onboarded is set here, with the records, so a reload on the last screen never re-runs setup and duplicates them.
-  setSettings({ onboarded: true, name: o.name.trim(), wage: n(o.wage), coolHours: o.cool, anchor: { amount: n(o.balance), date: t, ts: now }, startDate: s().settings.startDate || t });
+  const scheduled = o.incomes.some((i) => n(i.amount) > 0) || (o.lump && n(o.lump.amount) > 0);
+  setSettings({ onboarded: true, name: o.name.trim(), payType: o.payType || "none", wage: o.payType === "hourly" ? n(o.wage) : 0, lastUntil: !scheduled && o.lastUntil > t ? o.lastUntil : s().settings.lastUntil || null, coolHours: o.cool, anchor: { amount: n(o.balance), date: t, ts: now }, startDate: s().settings.startDate || t });
   for (const i of o.incomes) if (n(i.amount) > 0) put("income", { id: uid(), name: i.name, amount: n(i.amount), freq: i.freq, next: rollForward(i.next, i.freq, dayOfMonth(i.next), t), day: dayOfMonth(i.next) });
   if (o.lump && n(o.lump.amount) > 0) {
     const amt = n(o.lump.amount);
@@ -125,6 +132,7 @@ export const onboardActions = {
   "bill-add": (el) => { o.bills.push({ name: el.dataset.name, amount: "", next: addDays(today(), 7), kind: el.dataset.kind }); },
   "bill-del": (el) => { o.bills.splice(Number(el.dataset.i), 1); },
   cool: (el) => { o.cool = Number(el.dataset.h); },
+  pay: (el) => { o.payType = el.dataset.p; },
   finish: () => { finish(); o.step = 5; showingDone = true; },
   auto: () => { showingDone = false; location.hash = "#/automate"; },
   done: () => { showingDone = false; location.hash = "#/"; toast("You're set. Log your first spend with the plus button."); },

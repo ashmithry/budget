@@ -2,7 +2,7 @@ import { get, commit } from "../store.js";
 import { ai, AIError } from "../ai.js";
 import { today, addDays, diffDays, monthStart, dayOfMonth, dowName } from "../dates.js";
 import { live, categoryMonth, leaks, moodStats, regretStats, weekdayStats, lateNight, resisted, noSpendStreak, underStreak, weekReview, txIn, isFlex, catById, MOODS, round2, recurringMonthly } from "../engine.js";
-import { esc, money, plural, hoursText, ic, catTile, emptyState, toast, nudge } from "../ui.js";
+import { esc, money, plural, costFrame, ic, catTile, emptyState, toast, nudge } from "../ui.js";
 
 const s = () => get();
 
@@ -83,7 +83,6 @@ export function renderInsights() {
   const res = resisted(st);
   const resM = resisted(st, mStart);
   const wk = weekReview(st);
-  const wage = Number(st.settings.wage) || 0;
   const hasData = live(st.tx).some(isFlex);
 
   // A few specific, data-driven suggestions.
@@ -113,7 +112,7 @@ export function renderInsights() {
     <div class="row between muted"><span>No-spend days</span><span>${wk.noSpend}</span></div>
     ${wk.prevSpent ? `<div class="row between muted"><span>Week before</span><span class="num">${money(wk.prevSpent)}</span></div>` : ""}</div>` : ""}
   ${cats.length ? `<div class="section-title"><span>Where it went this month</span></div><div class="card">${cats.map((c) => `<div class="hbar"><span class="hb-l">${catTile(c)}${esc(c.name)}</span><div class="track"><i style="width:${(c.spent / maxCat) * 100}%"></i></div><span class="num" style="text-align:right">${money(c.spent, { cents: false })}</span></div>`).join("")}</div>` : ""}
-  ${lk.length ? `<div class="section-title"><span>Small stuff that adds up</span></div><div class="list">${lk.map((l) => `<div class="item">${catTile(catById(st, l.cat))}<div class="main"><div class="name">${esc(l.label)}</div><div class="meta">${l.n}× in 30 days, avg ${money(l.avg)}</div></div><div class="amt num">${money(l.total)}<span class="sub">${money(l.yearly, { cents: false })}/yr${wage ? `, ${hoursText(l.yearly / wage)}` : ""}</span></div></div>`).join("")}</div>` : ""}
+  ${lk.length ? `<div class="section-title"><span>Small stuff that adds up</span></div><div class="list">${lk.map((l) => `<div class="item">${catTile(catById(st, l.cat))}<div class="main"><div class="name">${esc(l.label)}</div><div class="meta">${l.n}× in 30 days, avg ${money(l.avg)}</div></div><div class="amt num">${money(l.total)}<span class="sub">${money(l.yearly, { cents: false })}/yr${costFrame(l.yearly) ? `, ${costFrame(l.yearly)}` : ""}</span></div></div>`).join("")}</div>` : ""}
   ${moods.length ? `<div class="section-title"><span>Why you spend</span></div><div class="card">${moods.map((m) => {
     const md = MOODS.find((x) => x.id === m.mood);
     return `<div class="hbar"><span class="hb-l"><span class="tile">${ic(md?.icon || "tag", { size: 17 })}</span>${md?.label || m.mood}</span><div class="track"><i style="width:${(m.total / Math.max(...moods.map((x) => x.total))) * 100}%;${["bored", "stressed", "deal"].includes(m.mood) ? "background:var(--bronze)" : ""}"></i></div><span class="num" style="text-align:right">${money(m.total, { cents: false })}</span></div>${m.rated ? `<div class="tiny faint" style="margin:-2px 0 6px 100px">${Math.round((m.regret / m.rated) * 100)}% regretted</div>` : ""}`;

@@ -17,7 +17,11 @@ export function renderSettings() {
   return `<header class="top"><div><h1>Settings</h1></div><a class="icon-btn" href="#/" aria-label="Back">${ic("chevron-left", { size: 22 })}</a></header>
   <div class="card">
     <label class="f"><span>Your name</span><input class="in" data-set="name" value="${esc(st.name)}" placeholder="Optional" maxlength="30"></label>
-    ${num("wage", "What you earn per hour", "Prices get shown as hours of work. A $60 hoodie is 4 hours at $15/hr.")}
+    <label class="f"><span>How you get paid</span><select class="in" data-set="payType">
+      ${[["contract", "Contract or gig work (pay varies)"], ["hourly", "Hourly job"], ["none", "Not working right now"]].map(([k, l]) => `<option value="${k}" ${(st.payType || "none") === k ? "selected" : ""}>${l}</option>`).join("")}
+    </select><div class="tiny faint" style="margin:4px 4px 0">Prices are shown as days of your budget${st.payType === "hourly" ? ", and as hours of work" : ""}. $45 is about 3 days at $15 a day.</div></label>
+    ${st.payType === "hourly" ? num("wage", "Hourly pay", "Adds hours of work to every price. A $60 hoodie is 4 hours at $15/hr.") : ""}
+    ${num("taxPct", "Set aside for taxes from contract pay (%)", "No tax is taken out of contract pay. 20% is a common rule of thumb for students; check with a tax pro for your situation. 0 turns it off.")}
     ${num("buffer", "Safety cushion", "Kept out of your daily number for surprises.")}
     ${num("coolHours", "Waitlist time (hours)", "How long to wait before buying something you want. 24 to 72 is a good range.")}
     ${num("bigPurchase", "Ask \"was it worth it?\" for purchases over", "The next day, you rate it. Your regrets show up in Insights.")}
@@ -44,7 +48,8 @@ export function bindSettings(root) {
     i.onchange = () => {
       const k = i.dataset.set;
       let v = i.value;
-      if (["wage", "buffer", "coolHours", "bigPurchase"].includes(k)) v = Math.max(0, round2(parseFloat(v) || 0));
+      if (["wage", "buffer", "coolHours", "bigPurchase", "taxPct"].includes(k)) v = Math.max(0, round2(parseFloat(v) || 0));
+      if (k === "taxPct") v = Math.min(60, v);
       const patch = { [k]: v };
       if (k === "roundUpGoal") patch.roundUpFrom = today();
       setSettings(patch);

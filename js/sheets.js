@@ -2,10 +2,18 @@
 import { get, put, remove, commit, setSettings } from "./store.js";
 import { today, addDays, pretty } from "./dates.js";
 import { compute, impact, categories, catById, guessCategory, goalSaved, MOODS, live, round2, normMerchant, uid } from "./engine.js";
-import { sheet, esc, money, hoursText, toast, haptic, confirmSheet, ic, chip, catLook, topSheet } from "./ui.js";
+import { sheet, esc, money, hoursText, costFrame, toast, haptic, confirmSheet, ic, chip, catLook, topSheet } from "./ui.js";
 import { ai, AIError } from "./ai.js";
 
 const s = () => get();
+
+const taxPct = () => Math.max(0, Math.min(60, Number(s().settings.taxPct) || 0));
+// The goal tax set-asides go into, created the first time it's needed.
+function taxGoal() {
+  const g = live(s().goals).find((x) => x.taxes);
+  if (g) return g;
+  return put("goals", { id: uid(), type: "goal", taxes: true, name: "Taxes", icon: "receipt-text", target: 0, perPay: 0, start: 0 });
+}
 
 /* ---------- amount keypad ---------- */
 function keypadHTML() {
@@ -47,6 +55,8 @@ export function openAdd(prefill = {}) {
   const editing = prefill.id ? live(s().tx).find((x) => x.id === prefill.id) : null;
   const st = {
     kind: editing?.kind || prefill.kind || "expense",
+    // Contract pay usually has no tax taken out: offer to set some aside.
+    tax: prefill.contract ?? s().settings.payType === "contract",
     amt: editing ? String(Math.abs(editing.amount)) : prefill.amount ? String(prefill.amount) : "",
     note: editing?.note || prefill.note || "",
     cat: editing?.cat || prefill.cat || null,
@@ -74,6 +84,7 @@ export function openAdd(prefill = {}) {
       <div class="chips scroll" id="cats">${cats.map((c) => chip(catLook(c).icon, c.name, st.cat === c.id, `data-cat="${c.id}"`, catLook(c).color)).join("")}</div>
       ${st.refund ? "" : `<div class="small muted" style="margin:12px 4px 6px">Why? <span class="faint">(optional, helps spot your triggers)</span></div>
       <div class="chips scroll" id="moods">${MOODS.map((m) => chip(m.icon, m.label, st.mood === m.id, `data-mood="${m.id}"`)).join("")}</div>`}` : ""}
+      ${st.kind === "income" && !editing && taxPct() > 0 ? `<label class="switch" style="margin-top:4px"><span>Contract pay: set aside ${taxPct()}% for taxes<div class="tiny faint">No tax is taken out of contract pay, so it goes into a Taxes goal and doesn't count as spending money.</div></span><input type="checkbox" id="tax" ${st.tax ? "checked" : ""}></label>` : ""}
       ${keypadHTML()}
       <div class="row" style="margin-bottom:10px">
         <label class="grow small muted" style="display:flex;align-items:center;gap:8px">${ic("calendar", { size: 18 })}<input type="date" class="in" id="date" value="${st.date}" max="${addDays(today(), 400)}" style="min-height:40px;padding:6px 10px"></label>
@@ -87,8 +98,8 @@ export function openAdd(prefill = {}) {
     const a = parseFloat(st.amt) || 0;
     if (!a || st.kind !== "expense" || st.refund) { el.innerHTML = ""; return; }
     const c = compute(s());
-    const wage = Number(s().settings.wage) || 0;
-    const hrs = wage ? `, ${hoursText(a / wage)}` : "";
+    const cf = costFrame(a);
+    const hrs = cf ? `, ${cf}` : "";
     const base = editing && editing.date === today() ? c.leftToday + Number(editing.amount) : c.leftToday;
     const after = round2(base - a);
     if (st.date !== today()) el.innerHTML = `<span class="muted">${hrs.slice(2).replace(/^./, (m) => m.toUpperCase())}</span>`;
@@ -134,6 +145,7 @@ export function openAdd(prefill = {}) {
       el.querySelectorAll("[data-mood]").forEach((x) => x.classList.toggle("on", x.dataset.mood === st.mood));
     }));
     el.querySelector("#date").onchange = (e) => { st.date = e.target.value || today(); hint(); };
+    el.querySelector("#tax")?.addEventListener("change", (e) => (st.tax = e.target.checked));
     const nl = el.querySelector("#nl");
     const nlgo = el.querySelector("#nlgo");
     if (nl && nlgo) {
@@ -214,6 +226,10 @@ export function openAdd(prefill = {}) {
       const msg = after.leftToday >= 0 ? `Logged. ${money(after.leftToday)} left today` : `Logged. ${money(-after.leftToday)} over today`;
       toast(msg, { label: "Undo", run: () => remove("tx", tx.id) });
       prefill.onDone?.(tx, before, after);
+    } else if (!editing && st.kind === "income" && st.tax && taxPct() > 0) {
+      const aside = round2((a * taxPct()) / 100);
+      put("tx", { id: uid(), kind: "save", amount: aside, goalId: taxGoal().id, note: `Tax set-aside from ${tx.note || "contract pay"}`, date: st.date, ts: Date.now() + 1, source: "manual" });
+      toast(`Logged ${money(a)}. ${money(aside)} set aside for taxes, ${money(a - aside)} is yours to spend.`);
     } else toast(editing ? "Saved" : "Logged");
   }
   return sh;
@@ -240,13 +256,14 @@ export function openAfford(prefill = {}) {
     const head = { fits: "It fits", tight: "It's tight", no: "Not right now" }[r.verdict];
     const headIc = { fits: "circle-check", tight: "triangle-alert", no: "ban" }[r.verdict];
     const lines = [];
-    if (r.pool < 0) lines.push(["triangle-alert", `You're already <b>${money(-r.pool)}</b> short for bills before payday. This would make it ${money(-r.poolAfter)}.`]);
+    if (r.pool < 0) lines.push(["triangle-alert", `You're already <b>${money(-r.pool)}</b> short for bills before ${r.scheduled ? "payday" : pretty(r.end)}. This would make it ${money(-r.poolAfter)}.`]);
     else if (r.leftAfter >= 0) lines.push(["wallet", `Leaves <b>${money(r.leftAfter)}</b> of today's ${money(r.dailyBase)}`]);
-    else lines.push(["trending-down", `Puts you <b>${money(r.overToday)}</b> over today. ${r.dailyAfter != null ? `Every day until ${pretty(r.end)} drops to <b>${money(r.dailyAfter)}</b> (from ${money(r.tomorrowDaily ?? r.dailyBase)})` : "That's the end of your money until next payday"}`]);
+    else lines.push(["trending-down", `Puts you <b>${money(r.overToday)}</b> over today. ${r.dailyAfter != null ? `Every day until ${pretty(r.end)} drops to <b>${money(r.dailyAfter)}</b> (from ${money(r.tomorrowDaily ?? r.dailyBase)})` : (r.scheduled ? "That's the end of your money until next payday" : "That's the end of your money until your end date")}`]);
     if (r.hours != null) lines.push(["clock", `That's <b>${hoursText(r.hours)}</b> at ${money(s().settings.wage)}/hr`]);
+    else if (r.budgetDays != null && r.budgetDays >= 0.25) lines.push(["calendar-days", `That's <b>${costFrame(r.price)}</b>`]);
     if (r.budget) lines.push(["receipt-text", r.budget.leftAfter >= 0 ? `${esc(r.budget.name)}: ${money(r.budget.leftAfter)} left this month after` : `${esc(r.budget.name)}: <b>${money(-r.budget.leftAfter)} over</b> this month's budget`]);
     if (r.goal && r.goal.pct >= 2) lines.push(["target", `Same as <b>${r.goal.pct}%</b> of your ${esc(r.goal.name)} goal`]);
-    if (r.poolAfter < 0 && r.pool >= 0) lines.push(["ban", `You'd be <b>${money(-r.poolAfter)}</b> short for bills before payday`]);
+    if (r.poolAfter < 0 && r.pool >= 0) lines.push(["ban", `You'd be <b>${money(-r.poolAfter)}</b> short for bills before ${r.scheduled ? "payday" : pretty(r.end)}`]);
     const cool = Number(s().settings.coolHours) || 48;
     return `<h3>${st.name ? esc(st.name) : "This purchase"}, ${money(r.price)}<button data-close>Close</button></h3>
       <div class="verdict ${r.verdict}"><div class="head">${ic(headIc, { size: 26, stroke: 2 })}<span>${head}</span></div><ul>${lines.map(([n, t]) => `<li>${ic(n, { size: 18 })}<span>${t}</span></li>`).join("")}</ul></div>

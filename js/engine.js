@@ -86,8 +86,11 @@ export function nextMoneyDay(state, t) {
 export function periodEnd(state, t) {
   const nm = nextMoneyDay(state, t);
   if (nm) return addDays(nm, -1) < t ? t : addDays(nm, -1);
-  // No money coming on a schedule: spread what's left until the last stretch fund's end date,
-  // or over the next 30 days, so bills early next month are still set aside.
+  // No money coming on a schedule (contract/gig pay, or nothing right now). Never assume a refill:
+  // spread what's left until the date you chose ("make it last until"), else the last stretch fund's
+  // end date, else the next 30 days, so bills early next month are still set aside.
+  const lastUntil = state.settings.lastUntil;
+  if (lastUntil && lastUntil >= t) return lastUntil;
   let until = null;
   for (const g of live(state.goals)) if (g.type === "stretch" && g.until && g.until >= t && (!until || g.until > until)) until = g.until;
   return until || addDays(t, 29);
@@ -133,7 +136,9 @@ export function compute(state, t = today()) {
   if (pool < 0) status = "short";
   else if (leftToday < 0) status = "over";
   else if (dailyBase > 0 && leftToday < dailyBase * 0.3) status = "tight";
-  return { t, end, daysLeft, cash, upcoming, upcomingTotal, buffer, pool, spentToday, dailyBase, leftToday, tomorrowDaily, status };
+  // scheduled: the period ends because money is coming (payday, release). Otherwise it's your own end date.
+  const scheduled = !!nextMoneyDay(state, t);
+  return { t, end, daysLeft, cash, upcoming, upcomingTotal, buffer, pool, spentToday, dailyBase, leftToday, tomorrowDaily, status, scheduled };
 }
 
 // What a purchase would do to the numbers, for the "Can I afford it?" check.
@@ -144,8 +149,10 @@ export function impact(state, price, cat, t = today()) {
   const poolAfter = round2(c.pool - p);
   const dailyAfter = c.daysLeft > 1 ? round2(Math.max(poolAfter, 0) / (c.daysLeft - 1)) : null;
   const overToday = Math.max(0, -leftAfter);
-  const wage = Number(state.settings.wage) || 0;
+  // Hours of work only make sense for hourly pay; everyone gets "days of your budget".
+  const wage = state.settings.payType === "hourly" ? Number(state.settings.wage) || 0 : 0;
   const hours = wage > 0 ? p / wage : null;
+  const budgetDays = c.dailyBase > 0 ? p / c.dailyBase : null;
   let budget = null;
   if (cat) {
     const m = categoryMonth(state, t).find((x) => x.id === cat);
@@ -157,7 +164,7 @@ export function impact(state, price, cat, t = today()) {
   else if (budget && budget.leftAfter < 0) verdict = "tight";
   const goals = live(state.goals).filter((g) => g.type !== "stretch" && Number(g.target) > goalSaved(state, g.id));
   const goal = goals[0] ? { name: goals[0].name, icon: goals[0].icon, pct: Math.round((p / Number(goals[0].target)) * 100) } : null;
-  return { ...c, price: p, leftAfter, poolAfter, dailyAfter, overToday, hours, budget, verdict, goal };
+  return { ...c, price: p, leftAfter, poolAfter, dailyAfter, overToday, hours, budgetDays, budget, verdict, goal };
 }
 
 export function categories(state) {
