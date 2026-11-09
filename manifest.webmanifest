@@ -1,0 +1,23 @@
+{
+  "name": "Budget: safe to spend",
+  "short_name": "Budget",
+  "description": "Know exactly what's safe to spend today. Built to beat impulse spending.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d0e12",
+  "theme_color": "#0f9a63",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Log spending", "short_name": "Log", "url": "/#/add", "icons": [{ "src": "/icons/sc-add.png", "sizes": "96x96" }] },
+    { "name": "Can I afford it?", "short_name": "Afford?", "url": "/#/afford", "icons": [{ "src": "/icons/sc-afford.png", "sizes": "96x96" }] },
+    { "name": "Waitlist", "url": "/#/wait", "icons": [{ "src": "/icons/sc-wait.png", "sizes": "96x96" }] }
+  ]
+}
