@@ -2,7 +2,7 @@ import { get, setSettings, commit, freshState, replaceState, mergeStates } from 
 import { today, addDays } from "../dates.js";
 import { live, compute, round2 } from "../engine.js";
 import { esc, money, toast, copy, confirmSheet, sheet, ic, tile } from "../ui.js";
-import { newKey, validKey, cleanKey, sync, currentToken, deleteCloud } from "../sync.js";
+import { newKey, sync, currentToken, deleteCloud, linkDevice } from "../sync.js";
 import { openBalanceCheck } from "../sheets.js";
 import { updateBadge } from "../badge.js";
 
@@ -34,7 +34,6 @@ export function renderSettings() {
   <div class="list">
     <button class="item" data-act="export">${tile("upload", "#2f6690")}<div class="main"><div class="name">Export backup (JSON)</div></div></button>
     <label class="item" style="cursor:pointer">${tile("download", "#2f6690")}<div class="main"><div class="name">Import backup</div><div class="meta">Merges with what's here</div></div><input type="file" accept="application/json,.json" id="import" hidden></label>
-    <button class="item" data-act="onboard">${tile("rotate-ccw", "#56625b")}<div class="main"><div class="name">Run setup again</div></div></button>
     <button class="item" data-act="reset">${tile("trash-2", "#b3312a")}<div class="main"><div class="name over">Erase everything on this device</div></div></button>
   </div>
   <p class="tiny faint" style="text-align:center">Your data stays on this device. Cloud sync is end-to-end encrypted.</p>`;
@@ -60,6 +59,7 @@ export function bindSettings(root) {
     try {
       const data = JSON.parse(await f.text());
       if (!data.settings || !Array.isArray(data.tx)) throw new Error("not a backup");
+      if (data.settings) data.settings.currency = String(data.settings.currency || "$").slice(0, 3);
       const merged = mergeStates(s(), data);
       merged.meta = s().meta;
       replaceState(merged);
@@ -91,7 +91,6 @@ export const settingsActions = {
     a.download = name;
     a.click();
   },
-  onboard: () => { setSettings({ onboarded: false }); location.hash = "#/"; },
   reset: async () => {
     if (await confirmSheet("Erase everything?", "All spending, bills, goals and settings on this device are deleted. If sync is on, your cloud copy stays until you delete it in Automations.", "Erase")) {
       const key = s().meta.key;
@@ -225,30 +224,35 @@ let d;
 try { d = await new Request(API).loadJSON(); } catch (e) { d = { ok: false, text: "Offline" }; }
 const COLORS = { good: ["#2E6A47", "#1F4A32"], tight: ["#A0660F", "#7A4C08"], over: ["#B3312A", "#86221D"], short: ["#B3312A", "#86221D"], stale: ["#3F4A43", "#28302B"] };
 const cur = d.cur || "$";
-const fmt = (n) => (n < 0 ? "-" : "") + cur + (Math.abs(n) >= 100 ? Math.round(Math.abs(n)).toString() : Math.abs(n).toFixed(2).replace(/\\.00$/, ""));
+const fmt = (n) => (n < 0 ? "-" : "") + cur + (Math.abs(n) >= 100 ? Math.round(Math.abs(n)).toString() : Math.abs(n).toFixed(2).replace(/\.00$/, ""));
+const st = d.ok ? d.status : "off";
+const live_ = st === "good" || st === "tight";
+const head = { good: "Safe to spend", tight: "Safe to spend", over: "Over today", short: "Short before payday", stale: "New pay period", off: "Budget" }[st] || "Budget";
+const big = live_ ? fmt(d.left) : st === "over" ? fmt(-d.left) : st === "short" ? fmt(-d.pool) : "Open app";
+const sub = live_ ? fmt(d.daily) + "/day, " + d.daysLeft + " days left" : st === "over" && d.tomorrow != null ? "Tomorrow " + fmt(d.tomorrow) + "/day" : d.text || "";
 const w = new ListWidget();
-w.url = "${ORIGIN}/";
+// No w.url: on iPhone a link would open Safari, which can't see the Home Screen app's data.
 w.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000);
 const fam = config.widgetFamily || "small";
 if (fam === "accessoryInline") {
-  w.addText(d.ok ? (d.left >= 0 ? fmt(d.left) + " left today" : "Over by " + fmt(-d.left)) : "Budget: open app");
+  w.addText(live_ ? fmt(d.left) + " left today" : st === "over" ? "Over by " + fmt(-d.left) : st === "short" ? "Short " + fmt(-d.pool) : "Budget: open the app");
 } else if (fam === "accessoryCircular") {
-  const a = w.addText(d.ok ? fmt(d.left) : "?"); a.font = Font.boldSystemFont(14); a.centerAlignText(); a.minimumScaleFactor = 0.5;
-  const b = w.addText("today"); b.font = Font.systemFont(10); b.centerAlignText();
+  const a = w.addText(live_ || st === "over" ? big : "!"); a.font = Font.boldSystemFont(14); a.centerAlignText(); a.minimumScaleFactor = 0.5;
+  const b = w.addText(st === "over" ? "over" : "today"); b.font = Font.systemFont(10); b.centerAlignText();
 } else if (fam === "accessoryRectangular") {
-  const h = w.addText(d.ok ? (d.left >= 0 ? "SAFE TODAY" : "OVER TODAY") : "BUDGET"); h.font = Font.boldSystemFont(11);
-  const a = w.addText(d.ok ? fmt(Math.abs(d.left)) : "Open app"); a.font = Font.boldRoundedSystemFont(22);
-  if (d.ok) { const c = w.addText(fmt(d.daily) + "/day, " + d.daysLeft + "d left"); c.font = Font.systemFont(11); }
+  const h = w.addText(head); h.font = Font.boldSystemFont(11);
+  const a = w.addText(big); a.font = Font.boldRoundedSystemFont(22); a.minimumScaleFactor = 0.6;
+  const c = w.addText(sub); c.font = Font.systemFont(11); c.minimumScaleFactor = 0.7;
 } else {
-  const g = new LinearGradient(); const c = COLORS[d.status] || COLORS.stale;
+  const g = new LinearGradient(); const c = COLORS[st] || COLORS.stale;
   g.colors = [new Color(c[0]), new Color(c[1])]; g.locations = [0, 1]; w.backgroundGradient = g;
   w.setPadding(14, 14, 14, 14);
-  const h = w.addText(d.ok ? (d.left >= 0 ? "SAFE TO SPEND" : "OVER TODAY") : "BUDGET"); h.font = Font.boldSystemFont(11); h.textColor = new Color("#ffffff", 0.85);
+  const h = w.addText(head); h.font = Font.semiboldSystemFont(12); h.textColor = new Color("#ffffff", 0.85);
   w.addSpacer(4);
-  const a = w.addText(d.ok ? fmt(Math.abs(d.left)) : "Open app"); a.font = Font.heavyRoundedSystemFont(fam === "small" ? 34 : 40); a.textColor = Color.white(); a.minimumScaleFactor = 0.5; a.lineLimit = 1;
+  const a = w.addText(big); a.font = Font.heavyRoundedSystemFont(fam === "small" ? 34 : 40); a.textColor = Color.white(); a.minimumScaleFactor = 0.5; a.lineLimit = 1;
   w.addSpacer();
-  const t = w.addText(d.ok ? (d.status === "over" && d.tomorrow != null ? "Tomorrow " + fmt(d.tomorrow) + "/day" : fmt(d.daily) + "/day, " + d.daysLeft + " days left") : d.text || ""); t.font = Font.mediumSystemFont(12); t.textColor = new Color("#ffffff", 0.9); t.minimumScaleFactor = 0.7;
-  if (d.ok && d.streak > 0 && fam !== "small") { const s = w.addText(d.streak + "-day no-spend streak"); s.font = Font.systemFont(11); s.textColor = new Color("#ffffff", 0.85); }
+  const t = w.addText(sub); t.font = Font.mediumSystemFont(12); t.textColor = new Color("#ffffff", 0.9); t.minimumScaleFactor = 0.7;
+  if (live_ && d.streak > 0 && fam !== "small") { const s2 = w.addText(d.streak + "-day no-spend streak"); s2.font = Font.systemFont(11); s2.textColor = new Color("#ffffff", 0.85); }
 }
 Script.setWidget(w);
 if (config.runsInApp) await w.presentSmall();
@@ -278,15 +282,20 @@ export const automateActions = {
     sh.bind = (el) => {
       el.querySelector("[data-close]").onclick = () => sh.close();
       el.querySelector("#go").onclick = async () => {
-        const k = el.querySelector("#k").value;
-        if (!validKey(k)) return toast("That key looks too short");
-        s().meta.key = cleanKey(k).match(/.{1,5}/g).join("-");
-        s().meta.rev = 0;
-        commit({ sync: false });
-        tokenCache = null;
-        sh.close();
-        try { await sync(); toast("Linked and synced"); } catch (e) { toast("Linked. Sync will retry when online."); }
-        if (s().settings.onboarded === false && live(s().tx).length) setSettings({ onboarded: true });
+        const btn = el.querySelector("#go");
+        btn.disabled = true;
+        btn.textContent = "Checking…";
+        try {
+          await linkDevice(el.querySelector("#k").value);
+          tokenCache = null;
+          sh.close();
+          if (!s().settings.onboarded && s().settings.anchor) setSettings({ onboarded: true });
+          toast("Linked and synced");
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = "Link";
+          toast(e.message.startsWith("budget_") ? "Couldn't reach the cloud. Check your connection." : e.message);
+        }
       };
     };
     sh.render();

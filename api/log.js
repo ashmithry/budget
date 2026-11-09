@@ -24,11 +24,15 @@ export default async function handler(req, res) {
   };
   try {
     await rpc("budget_log", { p_token: t, p_item: item });
-    const w = widgetNumbers(await rpc("budget_widget", { p_token: t }));
-    const what = `${money(kind === "income" ? item.amount : raw, w.cur || "$")}${item.merchant ? ` at ${item.merchant}` : ""}`;
-    const text = w.ok ? `Logged ${what}. ${w.text}` : `Logged ${what}.`;
-    return send(res, req, 200, { ok: true, logged: item, widget: w, text });
   } catch (e) {
     return send(res, req, e.status || 500, { ok: false, error: e.message, text: `Not logged: ${e.message}` });
+  }
+  // It's logged now. If reading today's numbers fails, still say so (a retry would double-count).
+  const what = `${money(kind === "income" ? item.amount : raw, "$")}${item.merchant ? ` at ${item.merchant}` : ""}`;
+  try {
+    const w = widgetNumbers(await rpc("budget_widget", { p_token: t }));
+    return send(res, req, 200, { ok: true, logged: item, widget: w, text: w.ok ? `Logged ${what}. ${w.text}` : `Logged ${what}.` });
+  } catch {
+    return send(res, req, 200, { ok: true, logged: item, text: `Logged ${what}.` });
   }
 }

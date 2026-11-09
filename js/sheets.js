@@ -2,7 +2,7 @@
 import { get, put, remove, commit, setSettings } from "./store.js";
 import { today, addDays, pretty } from "./dates.js";
 import { compute, impact, categories, catById, guessCategory, goalSaved, MOODS, live, round2, normMerchant, uid } from "./engine.js";
-import { sheet, esc, money, hoursText, toast, haptic, confirmSheet, ic, chip, catLook } from "./ui.js";
+import { sheet, esc, money, hoursText, toast, haptic, confirmSheet, ic, chip, catLook, topSheet } from "./ui.js";
 
 const s = () => get();
 
@@ -146,19 +146,21 @@ export function openAdd(prefill = {}) {
 
   // typing on a keyboard works too (desktop / iPad)
   const onKey = (e) => {
-    if (e.target.matches("input, textarea")) return;
+    if (e.target.matches("input, textarea, select, button") || topSheet() !== sh) return;
     const k = e.key === "Backspace" ? "⌫" : e.key;
     if (/^[0-9.]$/.test(k) || k === "⌫") {
       st.amt = pressKey(st.amt, k);
       sh.el.querySelector("#amt").innerHTML = amountHTML(st.amt);
       hint();
-    } else if (e.key === "Enter") save();
+    } else if (e.key === "Enter") { e.preventDefault(); save(); }
   };
   document.addEventListener("keydown", onKey);
   const origClose = sh.close;
   sh.close = () => { document.removeEventListener("keydown", onKey); origClose(); };
 
+  let saved = false;
   function save() {
+    if (saved) return;
     const a = round2(parseFloat(st.amt) || 0);
     if (!a) { toast("Enter an amount"); return; }
     const before = compute(s());
@@ -177,6 +179,7 @@ export function openAdd(prefill = {}) {
       review: false,
     };
     if (!editing) { tx.ts = Date.now(); tx.late = st.date === today() && (h >= 22 || h < 4); }
+    saved = true;
     put("tx", tx);
     haptic(12);
     sh.close();
@@ -273,7 +276,7 @@ export function skipItem({ id, name, price, cat }) {
 }
 
 /* ---------- generic form sheet (Plan uses this for bills, income, goals, budgets, rules) ---------- */
-export function formSheet({ title, fields, value = {}, onSave, onDelete, saveLabel = "Save", note, deleteLabel = "Delete", confirmDelete = true }) {
+export function formSheet({ title, fields, value = {}, onSave, onDelete, saveLabel = "Save", note, deleteLabel = "Delete", confirmDelete = true, extra = "", onBind }) {
   const v = { ...value };
   const cur = esc(s().settings.currency || "$");
   const fieldHTML = (f) => {
@@ -291,6 +294,7 @@ export function formSheet({ title, fields, value = {}, onSave, onDelete, saveLab
   const sh = sheet(() => `<h3>${esc(title)}<button data-close>Cancel</button></h3>
     ${note ? `<p class="muted small" style="margin:-6px 4px 14px">${note}</p>` : ""}
     ${fields.map(fieldHTML).join("")}
+    ${extra}
     <button class="btn primary block" id="save">${esc(saveLabel)}</button>
     ${onDelete ? `<button class="btn danger block" id="del" style="margin-top:10px">${esc(deleteLabel)}</button>` : ""}`);
   const read = () => {
@@ -314,6 +318,7 @@ export function formSheet({ title, fields, value = {}, onSave, onDelete, saveLab
     el.querySelector("#del")?.addEventListener("click", async () => {
       if (!confirmDelete || (await confirmSheet(`Delete ${title.replace(/^(Edit|New) /, "")}?`, "This can't be undone."))) { onDelete(); sh.close(); }
     });
+    onBind?.(el);
   };
   sh.render();
   return sh;
@@ -322,10 +327,13 @@ export function formSheet({ title, fields, value = {}, onSave, onDelete, saveLab
 /* ---------- reconcile with the bank ---------- */
 export function openBalanceCheck() {
   const c = compute(s());
-  const inGoals = round2(live(s().goals).reduce((t, g) => t + goalSaved(s(), g.id), 0));
+  // Stretch-fund money always sits in checking; only regular goals can live in a separate savings account.
+  const inStretch = round2(live(s().goals).filter((g) => g.type === "stretch").reduce((t, g) => t + goalSaved(s(), g.id), 0));
+  const inRegular = round2(live(s().goals).filter((g) => g.type !== "stretch").reduce((t, g) => t + goalSaved(s(), g.id), 0));
+  const inGoals = round2(inStretch + inRegular);
   formSheet({
     title: "Match my bank",
-    note: `The app thinks you have <b>${money(c.cash + (s().settings.goalsSeparate ? 0 : inGoals))}</b>${inGoals > 0 && !s().settings.goalsSeparate ? ` (including ${money(inGoals)} set aside for goals)` : ""}. What do your checking account and cash add up to right now? We'll fix the difference.`,
+    note: `The app thinks you have <b>${money(c.cash + inStretch + (s().settings.goalsSeparate ? 0 : inRegular))}</b>${inGoals > 0 ? ` (including ${money(inStretch + (s().settings.goalsSeparate ? 0 : inRegular))} set aside for goals and stretch funds)` : ""}. What do your checking account and cash add up to right now? We'll fix the difference.`,
     fields: [
       { key: "amount", label: "Checking + cash right now", type: "money", required: true },
       ...(inGoals > 0 ? [{ key: "goalsSeparate", label: "My goal money is in a separate savings account", type: "toggle", default: !!s().settings.goalsSeparate }] : []),
@@ -333,7 +341,7 @@ export function openBalanceCheck() {
     saveLabel: "Update balance",
     onSave: (v) => {
       if (v.goalsSeparate !== undefined && v.goalsSeparate !== !!s().settings.goalsSeparate) setSettings({ goalsSeparate: v.goalsSeparate });
-      const target = v.amount - (s().settings.goalsSeparate ? 0 : inGoals);
+      const target = v.amount - inStretch - (s().settings.goalsSeparate ? 0 : inRegular);
       const diff = round2(target - compute(s()).cash);
       if (Math.abs(diff) < 0.005) { toast("Already matches your bank"); return; }
       put("tx", { id: uid(), kind: "adjust", amount: diff, note: "Balance check", cat: "adjust", date: today(), ts: Date.now(), source: "manual" });

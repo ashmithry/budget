@@ -11,7 +11,7 @@ export function esc(s) {
 }
 
 export function money(n, { cents = "auto", sign = false } = {}) {
-  const cur = get().settings.currency || "$";
+  const cur = esc(String(get().settings.currency || "$").slice(0, 3));
   const v = Math.abs(Number(n) || 0);
   let s;
   if (cents === false || (cents === "auto" && v >= 1000)) s = Math.round(v).toLocaleString("en-US");
@@ -91,6 +91,7 @@ export function sheet(render, { onClose } = {}) {
   return api;
 }
 export const closeAllSheets = () => [...openSheets].forEach((s) => s.close());
+export const topSheet = () => openSheets[openSheets.length - 1];
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && openSheets.length) openSheets[openSheets.length - 1].close(); });
 
 export function confirmSheet(title, body, okLabel = "Delete", danger = true) {

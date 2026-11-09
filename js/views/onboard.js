@@ -1,7 +1,7 @@
 // First-run setup: balance, income, bills, habits. About 2 minutes, every step skippable.
 import { get, put, setSettings, runAutomation } from "../store.js";
 import { today, addDays, diffDays, FREQS, dayOfMonth } from "../dates.js";
-import { compute, uid, round2 } from "../engine.js";
+import { compute, uid, round2, rollForward } from "../engine.js";
 import { esc, money, toast, ic, tile, chip, nudge } from "../ui.js";
 import { automateActions } from "./settings.js";
 
@@ -95,8 +95,9 @@ const n = (x) => round2(parseFloat(String(x).replace(/[^\d.-]/g, "")) || 0);
 function finish() {
   const t = today();
   const now = Date.now();
-  setSettings({ name: o.name.trim(), wage: n(o.wage), coolHours: o.cool, anchor: { amount: n(o.balance), date: t, ts: now }, startDate: s().settings.startDate || t });
-  for (const i of o.incomes) if (n(i.amount) > 0) put("income", { id: uid(), name: i.name, amount: n(i.amount), freq: i.freq, next: i.next < t ? t : i.next, day: dayOfMonth(i.next) });
+  // onboarded is set here, with the records, so a reload on the last screen never re-runs setup and duplicates them.
+  setSettings({ onboarded: true, name: o.name.trim(), wage: n(o.wage), coolHours: o.cool, anchor: { amount: n(o.balance), date: t, ts: now }, startDate: s().settings.startDate || t });
+  for (const i of o.incomes) if (n(i.amount) > 0) put("income", { id: uid(), name: i.name, amount: n(i.amount), freq: i.freq, next: rollForward(i.next, i.freq, dayOfMonth(i.next), t), day: dayOfMonth(i.next) });
   if (o.lump && n(o.lump.amount) > 0) {
     const amt = n(o.lump.amount);
     const weeks = Math.max(1, Math.ceil((diffDays(t, o.lump.until) + 1) / 7));
@@ -107,7 +108,7 @@ function finish() {
     put("goals", { id, type: "stretch", name: o.lump.name || "Lump sum", icon: "layers", target: amt, start: 0, perRelease: round2(amt / weeks), freq: "weekly", next: t, until: o.lump.until });
     put("tx", { id: uid(), kind: "save", amount: amt, goalId: id, note: `${o.lump.name} set aside`, date: t, ts: now + 2, source: "manual" });
   }
-  for (const b of o.bills) if (b.name && n(b.amount) > 0) put("bills", { id: uid(), name: b.name, amount: n(b.amount), freq: "monthly", next: b.next < t ? t : b.next, day: dayOfMonth(b.next), kind: b.kind, cat: b.kind === "bill" ? "bills" : "subs" });
+  for (const b of o.bills) if (b.name && n(b.amount) > 0) put("bills", { id: uid(), name: b.name, amount: n(b.amount), freq: "monthly", next: rollForward(b.next, "monthly", dayOfMonth(b.next), t), day: dayOfMonth(b.next), kind: b.kind, cat: b.kind === "bill" ? "bills" : "subs" });
   if (o.goal.name && (n(o.goal.target) > 0 || n(o.goal.perPay) > 0)) put("goals", { id: uid(), type: "goal", name: o.goal.name, icon: "life-buoy", target: n(o.goal.target), perPay: n(o.goal.perPay), start: 0 });
   // Bills due today post now; today's stretch release goes out.
   runAutomation();
@@ -124,10 +125,13 @@ export const onboardActions = {
   "bill-add": (el) => { o.bills.push({ name: el.dataset.name, amount: "", next: addDays(today(), 7), kind: el.dataset.kind }); },
   "bill-del": (el) => { o.bills.splice(Number(el.dataset.i), 1); },
   cool: (el) => { o.cool = Number(el.dataset.h); },
-  finish: () => { finish(); o.step = 5; },
-  auto: () => { setSettings({ onboarded: true }); runAutomation(); location.hash = "#/automate"; },
-  done: () => { setSettings({ onboarded: true }); runAutomation(); location.hash = "#/"; toast("You're set. Log your first spend with the plus button."); },
+  finish: () => { finish(); o.step = 5; showingDone = true; },
+  auto: () => { showingDone = false; location.hash = "#/automate"; },
+  done: () => { showingDone = false; location.hash = "#/"; toast("You're set. Log your first spend with the plus button."); },
 };
 
 export function onboardBefore(root) { readInputs(root); }
 export const onboardStep = () => o.step;
+// True only while the "you're set" screen is up right after finishing setup.
+let showingDone = false;
+export const onboardShowingDone = () => showingDone;

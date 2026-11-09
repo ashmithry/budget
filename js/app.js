@@ -1,17 +1,16 @@
 // Boot, routing, and the loops that keep things automatic (bills, paydays, sync, badge).
 import { get, subscribe, runAutomation, commit } from "./store.js";
 import { today } from "./dates.js";
-import { guessCategory, live } from "./engine.js";
 import { $, icon, toast, money, closeAllSheets, inl, nudge, plural } from "./ui.js";
 import { openAdd, openAfford } from "./sheets.js";
-import { sync, pushSnapshotSoon } from "./sync.js";
+import { sync, pushSoon } from "./sync.js";
 import { updateBadge } from "./badge.js";
 import { renderHome, homeActions } from "./views/home.js";
 import { renderActivity, activityActions, bindActivity } from "./views/activity.js";
 import { renderPlan, renderWait, planActions } from "./views/plan.js";
 import { renderInsights } from "./views/insights.js";
 import { renderSettings, bindSettings, renderAutomate, bindAutomate, settingsActions, automateActions, applyTheme } from "./views/settings.js";
-import { renderOnboard, onboardActions, onboardBefore } from "./views/onboard.js";
+import { renderOnboard, onboardActions, onboardBefore, onboardShowingDone } from "./views/onboard.js";
 
 const root = $("#app");
 const tabsEl = $("#tabs");
@@ -46,7 +45,7 @@ function render() {
   const key = location.hash;
   const keepScroll = key === lastRoute;
   const y = window.scrollY;
-  if (!st.settings.onboarded && r.name !== "automate") {
+  if ((!st.settings.onboarded || onboardShowingDone()) && r.name !== "automate") {
     root.innerHTML = renderOnboard();
     tabsEl.classList.add("hidden");
     lastRoute = key;
@@ -110,10 +109,11 @@ window.addEventListener("hashchange", () => {
   render();
 });
 
-subscribe(() => {
+// Re-render on every change; upload only user changes (sync's own bookkeeping is sync:false).
+subscribe((st, { sync: isUserChange } = {}) => {
   scheduleRender();
   updateBadge();
-  if (get().meta.key) pushSnapshotSoon();
+  if (isUserChange && get().meta.key) pushSoon();
 });
 
 /* ---------- automation loop ---------- */
@@ -131,18 +131,7 @@ function tick() {
 async function doSync() {
   if (!get().meta.key || !navigator.onLine) return;
   try {
-    const r = await sync({
-      onInbox: (txs) => {
-        for (const tx of txs) {
-          if (tx.kind !== "expense") { tx.review = false; continue; }
-          if (!tx.cat) tx.cat = guessCategory(get(), tx.note);
-          // Merchants you've categorized before are filed silently. New ones wait in "Check these".
-          const known = live(get().tx).some((x) => x !== tx && x.kind === "expense" && !x.review && x.note && x.note.toLowerCase() === (tx.note || "").toLowerCase());
-          tx.review = !known || !tx.cat;
-          if (!tx.cat) tx.cat = "other";
-        }
-      },
-    });
+    const r = await sync();
     if (r?.added) toast(`${r.added} purchase${r.added > 1 ? "s" : ""} logged automatically`);
     runAutomation();
     scheduleRender();
@@ -171,11 +160,12 @@ if (["add", "afford"].includes(route().name)) window.dispatchEvent(new HashChang
 doSync();
 
 if ("serviceWorker" in navigator && !location.hostname.match(/^(localhost|127\.)/)) {
+  const hadController = !!navigator.serviceWorker.controller; // first visit: no "updated" toast
   navigator.serviceWorker.register("/sw.js").then((reg) => {
     reg.addEventListener("updatefound", () => {
       const w = reg.installing;
       w?.addEventListener("statechange", () => {
-        if (w.state === "activated" && navigator.serviceWorker.controller) toast("Updated to the latest version", { label: "Reload", run: () => location.reload() });
+        if (w.state === "activated" && hadController) toast("Updated to the latest version", { label: "Reload", run: () => location.reload() });
       });
     });
   }).catch(() => {});

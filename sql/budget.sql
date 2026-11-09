@@ -1,5 +1,8 @@
--- Budget app cloud storage (Supabase "planner" project). Applied as migration budget_sync_v1.
+-- Budget app cloud storage (Supabase "planner" project). Applied as migrations budget_sync_v1 + budget_split_tokens_v2.
 -- The server never sees your budget: budget_vault.cipher is AES-GCM encrypted on the device.
+-- Two tokens, both derived on the device from the sync key:
+--   sync token (budget_vault.id = its hash): download, upload, delete. Never leaves the app.
+--   link token (budget_vault.link_id = its hash): goes in Shortcut/widget links. Can only log spending and read the widget numbers.
 -- It only sees a hash of your token, the encrypted blob, the small widget snapshot, and inbox items
 -- (spending posted by an iOS Shortcut / Android automation, waiting for the app to pick them up).
 
@@ -48,49 +51,56 @@ begin
 end;
 $$;
 
+alter table public.budget_vault add column if not exists link_id text;
+create unique index if not exists budget_vault_link_idx on public.budget_vault (link_id);
+
 -- Upload: refused if another device saved since this one last synced (the app merges and retries).
 -- Also clears inbox items the app has now imported (up to p_ack_seq), in the same step.
-create or replace function public.budget_push(p_token text, p_cipher text, p_base_rev bigint, p_snapshot jsonb default null, p_ack_seq bigint default 0)
+create or replace function public.budget_push(p_token text, p_link_token text, p_cipher text, p_base_rev bigint, p_snapshot jsonb default null, p_ack_seq bigint default 0)
 returns jsonb language plpgsql security definer set search_path to 'public' as $$
 declare
   v text := public.budget_vid(p_token);
+  l text := public.budget_vid(p_link_token);
   r bigint;
   nr bigint;
 begin
+  if v = l then raise exception 'tokens must differ'; end if;
   if p_cipher is null or p_cipher !~ '^v1[jz]:' then raise exception 'bad data'; end if;
   if octet_length(p_cipher) > 4000000 then raise exception 'too big'; end if;
   if p_snapshot is not null and octet_length(p_snapshot::text) > 20000 then raise exception 'snapshot too big'; end if;
   select rev into r from public.budget_vault where id = v for update;
   if r is null then
-    insert into public.budget_vault (id, cipher, rev, snapshot) values (v, p_cipher, 1, p_snapshot);
+    insert into public.budget_vault (id, link_id, cipher, rev, snapshot) values (v, l, p_cipher, 1, p_snapshot);
     nr := 1;
   elsif r <> p_base_rev then
     return jsonb_build_object('ok', false, 'conflict', true, 'rev', r);
   else
     nr := r + 1;
-    update public.budget_vault set cipher = p_cipher, rev = nr, snapshot = coalesce(p_snapshot, snapshot), updated_at = now() where id = v;
+    update public.budget_vault set cipher = p_cipher, rev = nr, link_id = coalesce(link_id, l), snapshot = coalesce(p_snapshot, snapshot), updated_at = now() where id = v;
   end if;
   if p_ack_seq > 0 then delete from public.budget_inbox where vault_id = v and seq <= p_ack_seq; end if;
   return jsonb_build_object('ok', true, 'rev', nr);
 end;
 $$;
 
--- Log spending from a Shortcut, Apple Pay automation or widget. The app imports it next time it opens.
+-- Log spending from a Shortcut, Apple Pay automation or widget (link token). Needs an existing cloud copy,
+-- so after "delete cloud copy" links stop working. The app imports items next time it opens.
 create or replace function public.budget_log(p_token text, p_item jsonb)
 returns jsonb language plpgsql security definer set search_path to 'public' as $$
 declare
-  v text := public.budget_vid(p_token);
+  v text;
   amt numeric;
   n int;
   s bigint;
 begin
+  select id into v from public.budget_vault where link_id = public.budget_vid(p_token);
+  if v is null then raise exception 'no budget for this link: turn on sync in the app and copy the link again'; end if;
   if p_item is null or jsonb_typeof(p_item) <> 'object' or octet_length(p_item::text) > 2000 then raise exception 'bad item'; end if;
   begin
     amt := (p_item->>'amount')::numeric;
   exception when others then raise exception 'bad amount';
   end;
   if amt is null or amt = 0 or abs(amt) > 100000 then raise exception 'bad amount'; end if;
-  insert into public.budget_vault (id) values (v) on conflict (id) do nothing;
   select count(*) into n from public.budget_inbox where vault_id = v;
   if n >= 500 then raise exception 'inbox full: open the app to import'; end if;
   insert into public.budget_inbox (vault_id, item) values (v, p_item) returning seq into s;
@@ -98,12 +108,13 @@ begin
 end;
 $$;
 
--- Widget data: the last snapshot from the app plus inbox items logged since (the widget adjusts for them).
+-- Widget data (link token): the last snapshot from the app plus inbox items logged since.
 create or replace function public.budget_widget(p_token text)
 returns jsonb language plpgsql security definer set search_path to 'public' as $$
 declare
-  v text := public.budget_vid(p_token);
+  v text;
 begin
+  select id into v from public.budget_vault where link_id = public.budget_vid(p_token);
   return jsonb_build_object(
     'snapshot', (select snapshot from public.budget_vault where id = v),
     'pending', coalesce((select jsonb_agg(jsonb_build_object('amount', item->'amount', 'kind', item->'kind', 'refund', item->'refund', 'at', coalesce((item->>'at')::bigint, (extract(epoch from created_at) * 1000)::bigint)) order by seq)
@@ -121,12 +132,12 @@ end;
 $$;
 
 revoke all on function public.budget_pull(text, bigint) from public;
-revoke all on function public.budget_push(text, text, bigint, jsonb, bigint) from public;
+revoke all on function public.budget_push(text, text, text, bigint, jsonb, bigint) from public;
 revoke all on function public.budget_log(text, jsonb) from public;
 revoke all on function public.budget_widget(text) from public;
 revoke all on function public.budget_forget(text) from public;
 grant execute on function public.budget_pull(text, bigint) to anon;
-grant execute on function public.budget_push(text, text, bigint, jsonb, bigint) to anon;
+grant execute on function public.budget_push(text, text, text, bigint, jsonb, bigint) to anon;
 grant execute on function public.budget_log(text, jsonb) to anon;
 grant execute on function public.budget_widget(text) to anon;
 grant execute on function public.budget_forget(text) to anon;

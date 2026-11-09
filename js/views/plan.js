@@ -1,4 +1,4 @@
-import { get, put, remove } from "../store.js";
+import { get, put, remove, runAutomation } from "../store.js";
 import { today, addDays, diffDays, pretty, prettyIn, FREQS, PER_MONTH, dayOfMonth } from "../dates.js";
 import { compute, live, categoryMonth, categories, goalSaved, recurringMonthly, incomeMonthly, round2, uid, resisted, catById } from "../engine.js";
 import { esc, money, toast, plural, hoursText, ic, tile, catTile, catLook } from "../ui.js";
@@ -94,6 +94,7 @@ function editBill(id, preset = {}) {
     onSave: (v) => {
       if (v.next < today()) { toast("Pick today or a future date"); return false; }
       put("bills", { ...(b || {}), id: b?.id || uid(), name: v.name, amount: Number(v.amount) || 0, freq: v.freq, next: v.next, day: dayOfMonth(v.next), kind: v.kind, cat: v.kind === "bill" ? "bills" : "subs", paused: !!v.paused });
+      runAutomation();
       toast(b ? "Saved" : `${v.name} added. It'll log itself.`);
     },
     onDelete: b ? () => remove("bills", b.id) : null,
@@ -151,6 +152,7 @@ function editIncome(id) {
     onSave: (v) => {
       if (v.next < today()) { toast("Pick today or a future date"); return false; }
       put("income", { ...(i || {}), id: i?.id || uid(), name: v.name, amount: Number(v.amount) || 0, freq: v.freq, next: v.next, day: dayOfMonth(v.next), done: false });
+      runAutomation();
       toast("Saved");
     },
     onDelete: i ? () => remove("income", i.id) : null,
@@ -181,6 +183,7 @@ function stretchNew() {
       if (!v.inBalance) put("tx", { id: uid(), kind: "income", amount: amt, note: v.name, cat: "income", date: t, ts: Date.now(), source: "manual" });
       put("goals", { id, type: "stretch", name: v.name, icon: "layers", target: amt, start: 0, perRelease: per, freq: "weekly", next: t, until: v.until });
       put("tx", { id: uid(), kind: "save", amount: amt, goalId: id, note: `${v.name} set aside`, date: t, ts: Date.now() + 1, source: "manual" });
+      runAutomation();
       toast(`${money(per)} a week for ${plural(weeks, "week")}. First one's out now.`);
     },
   });
@@ -224,22 +227,15 @@ function editGoal(id) {
       put("goals", { ...(g || {}), id: g?.id || uid(), type: "goal", name: v.name, icon: v.icon, target: Number(v.target) || 0, perPay: Number(v.perPay) || 0, start: g ? g.start : Number(v.start) || 0, due: v.due || null });
       toast("Saved");
     },
+    // "Already saved" money was never in your spending balance, so closing a goal only returns what came from it.
     onDelete: g ? () => {
-      const left = goalSaved(s(), g.id);
+      const left = round2(goalSaved(s(), g.id) - (Number(g.start) || 0));
       if (left > 0) put("tx", { id: uid(), kind: "unsave", amount: left, goalId: g.id, note: `${g.name} closed`, date: today(), ts: Date.now(), source: "manual" });
       remove("goals", g.id);
     } : null,
+    extra: g ? `<div class="two" style="margin:4px 0 12px"><button type="button" class="btn ghost" data-move="in">${ic("plus", { size: 18 })}Add money</button><button type="button" class="btn ghost" data-move="out">${ic("arrow-up-right", { size: 18 })}Take out</button></div>` : "",
+    onBind: g ? (el) => el.querySelectorAll("[data-move]").forEach((b) => (b.onclick = () => moveMoney(g, b.dataset.move))) : null,
   });
-  if (g) setTimeout(() => {
-    const el = document.querySelector(".sheet:last-of-type #save");
-    if (!el) return;
-    const extra = document.createElement("div");
-    extra.className = "two";
-    extra.style.margin = "10px 0";
-    extra.innerHTML = `<button class="btn ghost" data-move="in">${ic("plus", { size: 18 })}Add money</button><button class="btn ghost" data-move="out">${ic("arrow-up-right", { size: 18 })}Take out</button>`;
-    el.before(extra);
-    extra.querySelectorAll("[data-move]").forEach((b) => (b.onclick = () => moveMoney(g, b.dataset.move)));
-  }, 0);
 }
 function moveMoney(g, dir) {
   formSheet({
@@ -247,7 +243,11 @@ function moveMoney(g, dir) {
     note: dir === "in" ? "Moves money from your spending balance into this goal." : `Moves money back to spending. You have ${money(goalSaved(s(), g.id))} here.`,
     fields: [{ key: "amount", label: "Amount", type: "money", required: true }],
     onSave: (v) => {
-      put("tx", { id: uid(), kind: dir === "in" ? "save" : "unsave", amount: Number(v.amount), goalId: g.id, note: dir === "in" ? `Saved → ${g.name}` : `From ${g.name}`, date: today(), ts: Date.now(), source: "manual" });
+      const amt = Number(v.amount);
+      if (!(amt > 0)) { toast("Enter an amount above zero"); return false; }
+      if (dir === "out" && amt > goalSaved(s(), g.id) + 0.004) { toast(`There's only ${money(goalSaved(s(), g.id))} in ${g.name}`); return false; }
+      if (dir === "in" && amt > compute(s()).cash + 0.004) { toast(`You only have ${money(compute(s()).cash)} to move`); return false; }
+      put("tx", { id: uid(), kind: dir === "in" ? "save" : "unsave", amount: amt, goalId: g.id, note: dir === "in" ? `Saved → ${g.name}` : `From ${g.name}`, date: today(), ts: Date.now(), source: "manual" });
       toast(dir === "in" ? "Saved" : "Moved back to spending");
     },
   });
@@ -258,7 +258,10 @@ function fundSheet(g) {
     note: `${money(goalSaved(s(), g.id))} still set aside. Releases ${money(g.perRelease)} every week${g.next ? `, next ${prettyIn(g.next)}` : ""}.`,
     value: g,
     fields: [{ key: "perRelease", label: "Weekly release", type: "money", required: true }],
-    onSave: (v) => put("goals", { id: g.id, perRelease: Number(v.perRelease) }),
+    onSave: (v) => {
+      if (!(Number(v.perRelease) > 0)) { toast("The weekly release has to be more than zero"); return false; }
+      put("goals", { id: g.id, perRelease: Number(v.perRelease) });
+    },
     onDelete: () => {
       const left = goalSaved(s(), g.id);
       if (left > 0) put("tx", { id: uid(), kind: "unsave", amount: left, goalId: g.id, note: `${g.name} released`, date: today(), ts: Date.now(), source: "manual" });

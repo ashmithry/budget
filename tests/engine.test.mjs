@@ -152,3 +152,54 @@ test("widget recomputes from snapshot + pending logs, including the next day", (
   assert.equal(w.status, "stale");
   assert.equal(parseAmount("$1,204.50"), 1204.5);
 });
+
+test("no income: spreads over 30 days and sets aside next month's rent", () => {
+  const t = "2026-11-30";
+  const s = base(t, { settings: { anchor: { amount: 900, date: "2026-11-01", ts: 0 } }, bills: [{ id: "r", name: "Rent", amount: 800, freq: "monthly", next: "2026-12-01", day: 1 }] });
+  const c = compute(s, t);
+  assert.equal(c.daysLeft, 30);
+  assert.equal(c.upcomingTotal, 800);
+  assert.ok(c.leftToday < 5);
+});
+
+test("stretch fund's end date is honored after its last release", () => {
+  const t = "2026-11-27";
+  const s = base(t, { settings: { anchor: { amount: 100, date: t, ts: 0 } } });
+  s.goals.push({ id: "aid", type: "stretch", perRelease: 100, next: null, until: "2026-12-03" });
+  assert.equal(compute(s, t).end, "2026-12-03");
+});
+
+test("a weekly release of 0 releases nothing (never the whole fund)", () => {
+  const t = "2026-11-09";
+  const s = base(t, { settings: { anchor: { amount: 1000, date: t, ts: 0 } } });
+  s.goals.push({ id: "f", type: "stretch", perRelease: 0, next: t });
+  s.tx.push({ id: "x", kind: "save", amount: 1000, goalId: "f", date: t, ts: 1 });
+  autoRun(s, t);
+  assert.equal(goalSaved(s, "f"), 1000);
+});
+
+test("rollForward moves a past date along its schedule without posting", async () => {
+  const { rollForward } = await import("../js/engine.js");
+  assert.equal(rollForward("2026-11-06", "biweekly", 6, "2026-11-09"), "2026-11-20");
+  assert.equal(rollForward("2026-11-01", "monthly", 1, "2026-11-09"), "2026-12-01");
+  assert.equal(rollForward("2026-11-12", "monthly", 12, "2026-11-09"), "2026-11-12");
+});
+
+test("a delete always wins a merge, and automation doesn't bump updatedAt", () => {
+  const a = base("2026-11-09", { bills: [{ id: "b", name: "Gym", amount: 30, freq: "monthly", next: "2026-11-01", day: 1, updatedAt: 5 }] });
+  autoRun(a, "2026-11-09");
+  assert.equal(a.bills[0].updatedAt, 5);
+  const b = base("2026-11-09", { bills: [{ id: "b", deleted: true, updatedAt: 3 }] });
+  assert.equal(mergeStates(a, b).bills[0].deleted, true);
+});
+
+test("widget: logged income raises what's left instead of counting as negative spending", () => {
+  const t = "2026-11-09";
+  const s = base(t, { income: [{ id: "j", amount: 400, freq: "biweekly", next: "2026-11-19" }] });
+  const snap = snapshot(s, t);
+  snap.tz = 0;
+  const noon = Date.parse(t + "T12:00:00Z");
+  const w = widgetNumbers({ snapshot: snap, pending: [{ amount: 100, kind: "income", at: noon }] }, noon);
+  assert.equal(w.spentToday, 0);
+  assert.equal(w.left, 60);
+});

@@ -72,20 +72,24 @@ export function widgetNumbers(data, now = Date.now()) {
   if (!snap || !snap.day) return { ok: false, setup: true, text: "Open the budget app once to set up this widget." };
   const tz = Number(snap.tz) || 0;
   const t = dayAt(now, tz);
+  // Money logged since the app last synced. Income raises what's left; it isn't "negative spending".
   let pendAll = 0;
   let pendToday = 0;
+  let incomeAll = 0;
   for (const p of data.pending || []) {
     let a = Math.abs(parseAmount(p.amount)) || 0;
-    if (p.kind === "income" || p.refund) a = -a;
+    if (p.kind === "income") { incomeAll += a; continue; }
+    if (p.refund) a = -a;
     pendAll += a;
     if (dayAt(Number(p.at) || now, tz) === t) pendToday += a;
   }
   const cur = snap.cur || "$";
   let { dailyBase: base, spentToday: spent, daysLeft, pool } = snap;
-  pool = pool - pendAll;
+  pool = pool - pendAll + incomeAll;
   let stale = false;
   if (t <= snap.day) {
     spent = snap.spentToday + pendToday;
+    base = snap.dailyBase + incomeAll / Math.max(1, daysLeft);
   } else if (t <= snap.periodEnd) {
     daysLeft = diffDays(t, snap.periodEnd) + 1;
     spent = pendToday;
@@ -109,7 +113,7 @@ export function widgetNumbers(data, now = Date.now()) {
   if (stale) text = "New pay period. Open the app to refresh.";
   else if (status === "short") text = `You're ${money(-pool, cur)} short until payday. Hold off on extras.`;
   else if (status === "over") text = `Over by ${money(-left, cur)} today.${tomorrow != null ? ` Tomorrow: ${money(tomorrow, cur)}/day.` : ""}`;
-  else text = `${money(left, cur)} left today · ${money(base, cur)}/day through ${endDow}.`;
+  else text = `${money(left, cur)} left today. ${money(base, cur)} a day through ${endDow}.`;
   return {
     ok: true,
     status,
