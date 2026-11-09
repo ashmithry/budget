@@ -128,10 +128,10 @@ function income() {
   const c = compute(st);
   const pct = Math.max(0, Math.min(60, Number(st.settings.taxPct) || 0));
   return `
-  <div class="card nudge-card ${c.scheduled || st.settings.lastUntil ? "ok" : "warn"}"><div class="nudge"><span class="nic">${ic("calendar-days", { size: 18 })}</span><div class="grow">
+  <div class="card nudge-card ${c.scheduled || c.endSet ? "ok" : "warn"}"><div class="nudge"><span class="nic">${ic("calendar-days", { size: 18 })}</span><div class="grow">
     <div class="t">${c.scheduled ? `Next money comes ${prettyIn(addDays(c.end, 1))}` : `Your money is spread until ${pretty(c.end, { full: true })}`}</div>
-    <div class="d">${c.scheduled ? "Your daily number spreads what you have until then." : st.settings.lastUntil ? "You picked this date. Nothing is assumed to come in before it, so contract pay is a bonus until it lands." : "No end date set, so it's spread over the next 30 days. Pick a real one, like the end of the semester or when your next contract pays out."}</div>
-    ${c.scheduled ? "" : `<div class="btns"><button class="btn sm ${st.settings.lastUntil ? "ghost" : "primary"}" data-act="end-date">${st.settings.lastUntil ? "Change end date" : "Set my end date"}</button></div>`}
+    <div class="d">${c.scheduled ? "Your daily number spreads what you have until then." : c.endSet ? "You picked this date. Nothing is assumed to come in before it, so contract pay is a bonus until it lands." : c.endExpired ? `Your end date (${pretty(st.settings.lastUntil)}) has passed, so it's spread over the next 30 days for now. Pick a new one.` : "No end date set, so it's spread over the next 30 days. Pick a real one, like the end of the semester or when your next contract pays out."}</div>
+    ${c.scheduled ? "" : `<div class="btns"><button class="btn sm ${c.endSet ? "ghost" : "primary"}" data-act="end-date">${c.endSet ? "Change end date" : c.endExpired ? "Pick a new end date" : "Set my end date"}</button></div>`}
   </div></div></div>
   <div class="section-title"><span>Contract or gig pay</span></div>
   <div class="card"><p class="small muted" style="margin:0 0 12px">Pay that varies isn't counted until it lands, so a late client never breaks your budget. When you get paid, log it here${pct > 0 ? ` and ${pct}% goes into a Taxes goal (no tax is taken out of contract pay)` : ""}.</p>
@@ -327,7 +327,7 @@ function endDateSheet() {
   formSheet({
     title: "Make my money last until",
     note: "With no steady paycheck, your daily number is what you have divided by the days until this date. Contract pay you log later raises it.",
-    value: { lastUntil: cur || addDays(today(), 30) },
+    value: { lastUntil: cur && cur > today() ? cur : addDays(today(), 30) },
     fields: [{ key: "lastUntil", label: "Last until", type: "date", required: true, help: "End of semester, next refund, or when a contract should pay out." }],
     saveLabel: "Save end date",
     onSave: (v) => {

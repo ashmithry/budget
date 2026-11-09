@@ -89,11 +89,17 @@ export function periodEnd(state, t) {
   // No money coming on a schedule (contract/gig pay, or nothing right now). Never assume a refill:
   // spread what's left until the date you chose ("make it last until"), else the last stretch fund's
   // end date, else the next 30 days, so bills early next month are still set aside.
-  const lastUntil = state.settings.lastUntil;
-  if (lastUntil && lastUntil >= t) return lastUntil;
+  const lastUntil = activeEndDate(state, t);
+  if (lastUntil) return lastUntil;
   let until = null;
   for (const g of live(state.goals)) if (g.type === "stretch" && g.until && g.until >= t && (!until || g.until > until)) until = g.until;
   return until || addDays(t, 29);
+}
+
+// The "make my money last until" date, only while it's still ahead (or today). A past date is expired.
+export function activeEndDate(state, t) {
+  const d = state.settings.lastUntil;
+  return d && d >= t ? d : null;
 }
 
 // Moves a past date forward along its schedule without posting anything (for dates already in the balance).
@@ -138,7 +144,10 @@ export function compute(state, t = today()) {
   else if (dailyBase > 0 && leftToday < dailyBase * 0.3) status = "tight";
   // scheduled: the period ends because money is coming (payday, release). Otherwise it's your own end date.
   const scheduled = !!nextMoneyDay(state, t);
-  return { t, end, daysLeft, cash, upcoming, upcomingTotal, buffer, pool, spentToday, dailyBase, leftToday, tomorrowDaily, status, scheduled };
+  // endSet: you chose this end date and it's still ahead. endExpired: you chose one and it has passed.
+  const endSet = !scheduled && !!activeEndDate(state, t);
+  const endExpired = !scheduled && !!state.settings.lastUntil && state.settings.lastUntil < t;
+  return { t, end, daysLeft, cash, upcoming, upcomingTotal, buffer, pool, spentToday, dailyBase, leftToday, tomorrowDaily, status, scheduled, endSet, endExpired };
 }
 
 // What a purchase would do to the numbers, for the "Can I afford it?" check.
@@ -162,7 +171,7 @@ export function impact(state, price, cat, t = today()) {
   if (poolAfter < 0) verdict = "no";
   else if (leftAfter < 0) verdict = p > c.pool * 0.35 ? "no" : "tight";
   else if (budget && budget.leftAfter < 0) verdict = "tight";
-  const goals = live(state.goals).filter((g) => g.type !== "stretch" && Number(g.target) > goalSaved(state, g.id));
+  const goals = live(state.goals).filter((g) => g.type !== "stretch" && !g.taxes && Number(g.target) > goalSaved(state, g.id));
   const goal = goals[0] ? { name: goals[0].name, icon: goals[0].icon, pct: Math.round((p / Number(goals[0].target)) * 100) } : null;
   return { ...c, price: p, leftAfter, poolAfter, dailyAfter, overToday, hours, budgetDays, budget, verdict, goal };
 }

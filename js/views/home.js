@@ -76,7 +76,9 @@ function nudges(c) {
     out.push(nudge("warn", catLook(h).icon, `${esc(h.name)}: ${h.state === "over" ? `${money(h.spent - h.limit)} over this month` : `${money(h.spent)} of ${money(h.limit)} already`}`, h.state === "over" ? "Anything more here comes out of your other plans." : `On pace for ${money(h.projected)} by month end. Go easy on this one for a few days.`));
   }
   // 9. setup prompts
-  if (!c.scheduled && !st.settings.lastUntil) out.push(nudge("info", "calendar-plus", "How long does this money need to last?", `Right now it's spread over the next 30 days. If nothing steady is coming in (contract or gig pay, or no job right now), pick your own end date, like the end of the semester. Contract pay only counts once it lands.`, `<a class="btn sm primary" href="#/plan/income">Set my end date</a>`));
+  if (!c.scheduled && c.endExpired) out.push(nudge("warn", "calendar-plus", `Your end date (${pretty(st.settings.lastUntil)}) has passed`, "Until you pick a new one, your money is spread over the next 30 days. Nothing is assumed to come in.", `<a class="btn sm primary" href="#/plan/income">Pick a new end date</a>`));
+  else if (!c.scheduled && !c.endSet) out.push(nudge("info", "calendar-plus", "How long does this money need to last?", `Right now it's spread over the next 30 days. If nothing steady is coming in (contract or gig pay, or no job right now), pick your own end date, like the end of the semester. Contract pay only counts once it lands.`, `<a class="btn sm primary" href="#/plan/income">Set my end date</a>`));
+  else if (c.endSet && c.daysLeft <= 3) out.push(nudge("info", "calendar-plus", `Your plan ends ${prettyIn(c.end)}`, "Whatever's left is spread over the days until then. If you need this money to last longer, pick your next end date now.", `<a class="btn sm ghost" href="#/plan/income">Change end date</a>`));
   if (!st.meta.key && !st.settings.hideAutoTip) out.push(nudge("info", "credit-card", "Log purchases automatically", "Every Apple Pay tap can log itself, and a widget can show today's number on your home and lock screen.", `<a class="btn sm primary" href="#/automate">Set it up</a><button class="btn sm ghost" data-act="hide-auto">Later</button>`));
   return out.join("");
 }
@@ -99,7 +101,7 @@ export function renderHome() {
   const line =
     c.status === "short" ? `Bills before ${pretty(addDays(c.end, 1))} need more than you have.`
     : c.status === "over" ? `Every day until ${pretty(c.end)} drops to ${money(c.tomorrowDaily ?? 0)}.`
-    : c.daysLeft === 1 ? `That's everything until money comes in tomorrow.`
+    : c.daysLeft === 1 ? (c.scheduled ? `That's everything until money comes in tomorrow.` : `Last day of your plan. Pick a new end date in Plan › Income.`)
     : `${money(c.dailyBase)} a day through ${pretty(c.end)}.`;
   return `
   <header class="top">

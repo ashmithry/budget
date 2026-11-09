@@ -12,7 +12,15 @@ const taxPct = () => Math.max(0, Math.min(60, Number(s().settings.taxPct) || 0))
 function taxGoal() {
   const g = live(s().goals).find((x) => x.taxes);
   if (g) return g;
-  return put("goals", { id: uid(), type: "goal", taxes: true, name: "Taxes", icon: "receipt-text", target: 0, perPay: 0, start: 0 });
+  // A fixed id so two devices that both create it end up with one goal after sync
+  // (unless an old one was deleted: deletes always win a merge, so then use a new id).
+  const id = s().goals.some((x) => x.id === "taxes") ? uid() : "taxes";
+  return put("goals", { id, type: "goal", taxes: true, name: "Taxes", icon: "receipt-text", target: 0, perPay: 0, start: 0 });
+}
+// The tax set-aside that came from an income record, if any. Its id is tied to the income's id.
+const taxFor = (txId) => live(s().tx).find((x) => x.id === `tax:${txId}`);
+function forgetTax(txId) {
+  if (taxFor(txId)) remove("tx", `tax:${txId}`);
 }
 
 /* ---------- amount keypad ---------- */
@@ -56,7 +64,7 @@ export function openAdd(prefill = {}) {
   const st = {
     kind: editing?.kind || prefill.kind || "expense",
     // Contract pay usually has no tax taken out: offer to set some aside.
-    tax: prefill.contract ?? s().settings.payType === "contract",
+    tax: !!prefill.contract, // on by default only from "Log contract pay", not for money from family etc.
     amt: editing ? String(Math.abs(editing.amount)) : prefill.amount ? String(prefill.amount) : "",
     note: editing?.note || prefill.note || "",
     cat: editing?.cat || prefill.cat || null,
@@ -174,6 +182,7 @@ export function openAdd(prefill = {}) {
     el.querySelector("#del")?.addEventListener("click", async () => {
       if (await confirmSheet("Delete this?", `${money(editing.amount)} ${editing.note || ""}`)) {
         remove("tx", editing.id);
+        forgetTax(editing.id);
         sh.close();
         toast("Deleted");
       }
@@ -219,6 +228,12 @@ export function openAdd(prefill = {}) {
     if (!editing) { tx.ts = Date.now(); tx.late = st.date === today() && (h >= 22 || h < 4); }
     saved = true;
     put("tx", tx);
+    // Editing contract pay keeps its tax set-aside in step (or drops it if it's no longer income).
+    if (editing && taxFor(tx.id)) {
+      const t = taxFor(tx.id);
+      if (tx.kind !== "income") forgetTax(tx.id);
+      else put("tx", { id: t.id, amount: round2((a * (Number(t.taxPct) || taxPct())) / 100), date: tx.date });
+    }
     haptic(12);
     sh.close();
     if (!editing && st.kind === "expense" && !st.refund) {
@@ -228,8 +243,8 @@ export function openAdd(prefill = {}) {
       prefill.onDone?.(tx, before, after);
     } else if (!editing && st.kind === "income" && st.tax && taxPct() > 0) {
       const aside = round2((a * taxPct()) / 100);
-      put("tx", { id: uid(), kind: "save", amount: aside, goalId: taxGoal().id, note: `Tax set-aside from ${tx.note || "contract pay"}`, date: st.date, ts: Date.now() + 1, source: "manual" });
-      toast(`Logged ${money(a)}. ${money(aside)} set aside for taxes, ${money(a - aside)} is yours to spend.`);
+      put("tx", { id: `tax:${tx.id}`, kind: "save", amount: aside, goalId: taxGoal().id, taxFor: tx.id, taxPct: taxPct(), note: `Tax set-aside from ${tx.note || "contract pay"}`, date: st.date, ts: Date.now() + 1, source: "manual" });
+      toast(`Logged ${money(a)}. ${money(aside)} set aside for taxes, ${money(a - aside)} is yours to spend.`, { label: "Undo", run: () => { remove("tx", tx.id); forgetTax(tx.id); } });
     } else toast(editing ? "Saved" : "Logged");
   }
   return sh;
@@ -312,7 +327,7 @@ export function openAfford(prefill = {}) {
 // "Skip it": counts toward money you've resisted, and offers to move it into a goal.
 export function skipItem({ id, name, price, cat }) {
   put("wish", { id: id || uid(), name: name || "Impulse buy", price, cat, status: "skipped", decidedDay: today(), added: Date.now() });
-  const goal = live(s().goals).find((g) => g.type !== "stretch");
+  const goal = live(s().goals).find((g) => g.type !== "stretch" && !g.taxes);
   haptic(20);
   if (goal) toast(`Nice. ${money(price)} not spent.`, { label: `Save to ${goal.name}`, run: () => { put("tx", { id: uid(), kind: "save", amount: price, goalId: goal.id, note: `Skipped ${name || "a buy"}`, date: today(), ts: Date.now(), source: "manual" }); toast(`${money(price)} moved to ${goal.name}`); } });
   else toast(`Nice. ${money(price)} not spent.`);
