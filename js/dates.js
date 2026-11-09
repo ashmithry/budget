@@ -81,3 +81,9 @@ export const shortDate = (s) => {
 };
 export const dowName = (i) => DOW[i];
 export const monthName = (s) => MON[Number(s.slice(5, 7)) - 1];
+
+// For use mid-sentence: "today", "tomorrow", but "Wed, Nov 11" keeps its capitals.
+export const prettyIn = (s, opts) => {
+  const p = pretty(s, opts);
+  return ["Today", "Yesterday", "Tomorrow"].includes(p) ? p.toLowerCase() : p;
+};

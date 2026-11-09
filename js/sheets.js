@@ -2,14 +2,14 @@
 import { get, put, remove, commit, setSettings } from "./store.js";
 import { today, addDays, pretty } from "./dates.js";
 import { compute, impact, categories, catById, guessCategory, goalSaved, MOODS, live, round2, normMerchant, uid } from "./engine.js";
-import { sheet, esc, money, hoursText, toast, haptic, confirmSheet } from "./ui.js";
+import { sheet, esc, money, hoursText, toast, haptic, confirmSheet, ic, chip, catLook } from "./ui.js";
 
 const s = () => get();
 
 /* ---------- amount keypad ---------- */
 function keypadHTML() {
   const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "⌫"];
-  return `<div class="keypad">${keys.map((k) => `<button type="button" data-k="${k}" aria-label="${k === "⌫" ? "Delete" : k}">${k}</button>`).join("")}</div>`;
+  return `<div class="keypad">${keys.map((k) => `<button type="button" data-k="${k}" aria-label="${k === "⌫" ? "Delete" : k}">${k === "⌫" ? ic("delete", { size: 24 }) : k}</button>`).join("")}</div>`;
 }
 function pressKey(str, k) {
   if (k === "⌫") return str.slice(0, -1);
@@ -69,12 +69,12 @@ export function openAdd(prefill = {}) {
       <label class="f"><input class="in" id="note" list="merchants" placeholder="${st.kind === "income" ? "From? (job, parents, Venmo…)" : "Where? (Chipotle, Target…)"}" value="${esc(st.note)}" autocomplete="off" enterkeyhint="done">
         <datalist id="merchants">${merchants.map((m) => `<option value="${esc(m.note)}">`).join("")}</datalist></label>
       ${st.kind === "expense" ? `
-      <div class="chips scroll" id="cats">${cats.map((c) => `<button type="button" class="chip-btn ${st.cat === c.id ? "on" : ""}" data-cat="${c.id}">${c.emoji} ${esc(c.name)}</button>`).join("")}</div>
+      <div class="chips scroll" id="cats">${cats.map((c) => chip(catLook(c).icon, c.name, st.cat === c.id, `data-cat="${c.id}"`, catLook(c).color)).join("")}</div>
       ${st.refund ? "" : `<div class="small muted" style="margin:12px 4px 6px">Why? <span class="faint">(optional, helps spot your triggers)</span></div>
-      <div class="chips scroll" id="moods">${MOODS.map((m) => `<button type="button" class="chip-btn ${st.mood === m.id ? "on" : ""}" data-mood="${m.id}">${m.emoji} ${m.label}</button>`).join("")}</div>`}` : ""}
+      <div class="chips scroll" id="moods">${MOODS.map((m) => chip(m.icon, m.label, st.mood === m.id, `data-mood="${m.id}"`)).join("")}</div>`}` : ""}
       ${keypadHTML()}
       <div class="row" style="margin-bottom:10px">
-        <label class="grow small muted" style="display:flex;align-items:center;gap:8px">📅 <input type="date" class="in" id="date" value="${st.date}" max="${addDays(today(), 400)}" style="min-height:40px;padding:6px 10px"></label>
+        <label class="grow small muted" style="display:flex;align-items:center;gap:8px">${ic("calendar", { size: 18 })}<input type="date" class="in" id="date" value="${st.date}" max="${addDays(today(), 400)}" style="min-height:40px;padding:6px 10px"></label>
       </div>
       <button class="btn primary block" id="save">${editing ? "Save" : "Log it"}</button>
       ${editing ? `<button class="btn danger block" id="del" style="margin-top:10px">Delete</button>` : ""}`;
@@ -200,7 +200,7 @@ export function openAfford(prefill = {}) {
       <p class="muted" style="margin:-6px 0 6px">Check before you tap. See what it really costs you.</p>
       <div class="amount-display num" id="amt">${amountHTML(st.amt)}</div>
       <label class="f"><input class="in" id="what" placeholder="What is it? (optional)" value="${esc(st.name)}" autocomplete="off"></label>
-      <div class="chips scroll" id="cats">${catOrder().map((c) => `<button type="button" class="chip-btn ${st.cat === c.id ? "on" : ""}" data-cat="${c.id}">${c.emoji} ${esc(c.name)}</button>`).join("")}</div>
+      <div class="chips scroll" id="cats">${catOrder().map((c) => chip(catLook(c).icon, c.name, st.cat === c.id, `data-cat="${c.id}"`, catLook(c).color)).join("")}</div>
       ${keypadHTML()}
       <button class="btn primary block" id="check">Check it</button>`;
   }
@@ -208,22 +208,23 @@ export function openAfford(prefill = {}) {
   function verdictHTML() {
     const r = impact(s(), parseFloat(st.amt) || 0, st.cat);
     const rules = live(s().rules).filter((x) => !x.cat || x.cat === st.cat);
-    const head = { fits: "✅ It fits", tight: "⚠️ It's tight", no: "🛑 Not right now" }[r.verdict];
+    const head = { fits: "It fits", tight: "It's tight", no: "Not right now" }[r.verdict];
+    const headIc = { fits: "circle-check", tight: "triangle-alert", no: "ban" }[r.verdict];
     const lines = [];
-    if (r.pool < 0) lines.push(["🧯", `You're already <b>${money(-r.pool)}</b> short for bills before payday. This would make it ${money(-r.poolAfter)}.`]);
-    else if (r.leftAfter >= 0) lines.push(["💵", `Leaves <b>${money(r.leftAfter)}</b> of today's ${money(r.dailyBase)}`]);
-    else lines.push(["📉", `Puts you <b>${money(r.overToday)}</b> over today. ${r.dailyAfter != null ? `Every day until ${pretty(r.end)} drops to <b>${money(r.dailyAfter)}</b> (from ${money(r.tomorrowDaily ?? r.dailyBase)})` : "That's the end of your money until next payday"}`]);
-    if (r.hours != null) lines.push(["⏱️", `That's <b>${hoursText(r.hours)}</b> at ${money(s().settings.wage)}/hr`]);
-    if (r.budget) lines.push(["🧾", r.budget.leftAfter >= 0 ? `${esc(r.budget.name)}: ${money(r.budget.leftAfter)} left this month after` : `${esc(r.budget.name)}: <b>${money(-r.budget.leftAfter)} over</b> this month's budget`]);
-    if (r.goal && r.goal.pct >= 2) lines.push([r.goal.emoji || "🎯", `Same as <b>${r.goal.pct}%</b> of your ${esc(r.goal.name)} goal`]);
-    if (r.poolAfter < 0 && r.pool >= 0) lines.push(["🚫", `You'd be <b>${money(-r.poolAfter)}</b> short for bills before payday`]);
+    if (r.pool < 0) lines.push(["triangle-alert", `You're already <b>${money(-r.pool)}</b> short for bills before payday. This would make it ${money(-r.poolAfter)}.`]);
+    else if (r.leftAfter >= 0) lines.push(["wallet", `Leaves <b>${money(r.leftAfter)}</b> of today's ${money(r.dailyBase)}`]);
+    else lines.push(["trending-down", `Puts you <b>${money(r.overToday)}</b> over today. ${r.dailyAfter != null ? `Every day until ${pretty(r.end)} drops to <b>${money(r.dailyAfter)}</b> (from ${money(r.tomorrowDaily ?? r.dailyBase)})` : "That's the end of your money until next payday"}`]);
+    if (r.hours != null) lines.push(["clock", `That's <b>${hoursText(r.hours)}</b> at ${money(s().settings.wage)}/hr`]);
+    if (r.budget) lines.push(["receipt-text", r.budget.leftAfter >= 0 ? `${esc(r.budget.name)}: ${money(r.budget.leftAfter)} left this month after` : `${esc(r.budget.name)}: <b>${money(-r.budget.leftAfter)} over</b> this month's budget`]);
+    if (r.goal && r.goal.pct >= 2) lines.push(["target", `Same as <b>${r.goal.pct}%</b> of your ${esc(r.goal.name)} goal`]);
+    if (r.poolAfter < 0 && r.pool >= 0) lines.push(["ban", `You'd be <b>${money(-r.poolAfter)}</b> short for bills before payday`]);
     const cool = Number(s().settings.coolHours) || 48;
     return `<h3>${st.name ? esc(st.name) : "This purchase"}, ${money(r.price)}<button data-close>Close</button></h3>
-      <div class="verdict ${r.verdict}"><div class="head">${head}</div><ul>${lines.map(([e, t]) => `<li><span>${e}</span><span>${t}</span></li>`).join("")}</ul></div>
+      <div class="verdict ${r.verdict}"><div class="head">${ic(headIc, { size: 26, stroke: 2 })}<span>${head}</span></div><ul>${lines.map(([n, t]) => `<li>${ic(n, { size: 18 })}<span>${t}</span></li>`).join("")}</ul></div>
       ${rules.length ? `<div class="card warn"><div class="small" style="font-weight:700;margin-bottom:4px">Your rules</div>${rules.map((x) => `<div>“${esc(x.text)}”</div>`).join("")}</div>` : ""}
       <div class="stack">
-        <button class="btn ${r.verdict === "fits" ? "ghost" : "primary"} block" id="wait">⏳ Wait ${cool} hours first</button>
-        <button class="btn ghost block" id="skip">💪 Skip it (counts as saved)</button>
+        <button class="btn ${r.verdict === "fits" ? "ghost" : "primary"} block" id="wait">${ic("hourglass", { size: 18 })}Wait ${cool} hours first</button>
+        <button class="btn ghost block" id="skip">Skip it, count it as saved</button>
         <button class="btn ${r.verdict === "fits" ? "primary" : "ghost"} block" id="buy">I'm buying it, log it</button>
       </div>
       <p class="tiny faint" style="text-align:center;margin-top:12px">Most urges fade within a day or two. Waiting is free.</p>`;
@@ -284,7 +285,7 @@ export function formSheet({ title, fields, value = {}, onSave, onDelete, saveLab
     if (f.type === "date") return `<label class="f">${lab}<input class="in" data-f="${f.key}" type="date" value="${esc(val)}">${f.help ? `<div class="tiny faint" style="margin:4px 4px 0">${f.help}</div>` : ""}</label>`;
     if (f.type === "number") return `<label class="f">${lab}<input class="in num" data-f="${f.key}" type="text" inputmode="decimal" value="${esc(val)}" placeholder="${esc(f.placeholder || "")}">${f.help ? `<div class="tiny faint" style="margin:4px 4px 0">${f.help}</div>` : ""}</label>`;
     if (f.type === "toggle") return `<label class="switch"><span>${esc(f.label)}${f.help ? `<div class="tiny faint">${f.help}</div>` : ""}</span><input type="checkbox" data-f="${f.key}" ${val ? "checked" : ""}></label>`;
-    if (f.type === "emoji") return `<label class="f">${lab}<div class="chips">${f.options.map((e) => `<button type="button" class="chip-btn ${val === e ? "on" : ""}" data-emoji="${f.key}" data-v="${e}">${e}</button>`).join("")}</div></label>`;
+    if (f.type === "icon") return `<label class="f">${lab}<div class="chips">${f.options.map((e) => `<button type="button" class="chip-btn icon-only ${val === e ? "on" : ""}" data-iconpick="${f.key}" data-v="${e}" aria-label="${e.replace(/-/g, " ")}" aria-pressed="${val === e}">${ic(e, { size: 20 })}</button>`).join("")}</div></label>`;
     return `<label class="f">${lab}<input class="in" data-f="${f.key}" type="text" value="${esc(val)}" placeholder="${esc(f.placeholder || "")}" ${f.max ? `maxlength="${f.max}"` : ""}></label>`;
   };
   const sh = sheet(() => `<h3>${esc(title)}<button data-close>Cancel</button></h3>
@@ -303,7 +304,7 @@ export function formSheet({ title, fields, value = {}, onSave, onDelete, saveLab
   };
   sh.bind = (el) => {
     el.querySelector("[data-close]").onclick = () => sh.close();
-    el.querySelectorAll("[data-emoji]").forEach((b) => (b.onclick = () => { read(); v[b.dataset.emoji] = b.dataset.v; sh.render(); }));
+    el.querySelectorAll("[data-iconpick]").forEach((b) => (b.onclick = () => { read(); v[b.dataset.iconpick] = b.dataset.v; sh.render(); }));
     el.querySelectorAll("select[data-f], input[type=checkbox][data-f]").forEach((i) => (i.onchange = () => { read(); if (fields.some((f) => f.show)) sh.render(); }));
     el.querySelector("#save").onclick = () => {
       read();
@@ -334,7 +335,7 @@ export function openBalanceCheck() {
       if (v.goalsSeparate !== undefined && v.goalsSeparate !== !!s().settings.goalsSeparate) setSettings({ goalsSeparate: v.goalsSeparate });
       const target = v.amount - (s().settings.goalsSeparate ? 0 : inGoals);
       const diff = round2(target - compute(s()).cash);
-      if (Math.abs(diff) < 0.005) { toast("Already matches 👍"); return; }
+      if (Math.abs(diff) < 0.005) { toast("Already matches your bank"); return; }
       put("tx", { id: uid(), kind: "adjust", amount: diff, note: "Balance check", cat: "adjust", date: today(), ts: Date.now(), source: "manual" });
       toast(diff < 0 ? `Adjusted by ${money(diff)}. Untracked spending?` : `Adjusted by ${money(diff, { sign: true })}`);
     },

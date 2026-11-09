@@ -1,5 +1,7 @@
 // Small DOM helpers: escaping, money formatting, bottom sheets, toasts, icons.
 import { get } from "./store.js";
+import { ic } from "./icons.js";
+import { DEFAULT_CATS } from "./engine.js";
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -110,17 +112,33 @@ export async function copy(text) {
   }
 }
 
-/* ---------- icons (inline SVG, stroke = currentColor) ---------- */
-const P = {
-  home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>',
-  list: '<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
-  plus: '<path d="M12 5v14M5 12h14"/>',
-  chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
-  plan: '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/>',
-  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
-  back: '<path d="M15 18l-6-6 6-6"/>',
-  bolt: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
-  search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
-  close: '<path d="M18 6 6 18M6 6l12 12"/>',
+/* ---------- icons ---------- */
+// Old short names used around the app, mapped to Lucide.
+const ALIAS = { home: "house", list: "receipt-text", chart: "chart-no-axes-column", plan: "calendar-days", gear: "settings", back: "chevron-left", bolt: "zap", close: "x" };
+export const icon = (name, opts) => ic(ALIAS[name] || name, opts);
+export { ic };
+
+const CAT_DEFAULTS = Object.fromEntries(DEFAULT_CATS.map((c) => [c.id, c]));
+export function catLook(c) {
+  const d = CAT_DEFAULTS[c?.id];
+  return { icon: c?.icon || d?.icon || "tag", color: c?.color || d?.color || "#7a7f72" };
+}
+// A tinted square with a colored stroke icon: the visual identity of a category, goal, bill…
+export const tile = (name, color = "#56625b", size = 19) => `<span class="tile" style="--c:${color}">${ic(name, { size })}</span>`;
+export const catTile = (c) => {
+  const l = catLook(c);
+  return tile(l.icon, l.color);
 };
-export const icon = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || ""}</svg>`;
+// Inline icon sitting in a line of text.
+export const inl = (name, size = 16) => ic(name, { size, cls: "inl" });
+
+// A selectable pill with an icon. `attrs` is a preformatted attribute string like 'data-cat="food"'.
+export const chip = (name, label, on, attrs, color) =>
+  `<button type="button" class="chip-btn ${on ? "on" : ""}" ${attrs}${color ? ` style="--c:${color}"` : ""}>${ic(name, { size: 16 })}<span>${esc(label)}</span></button>`;
+
+// Nudge card. kind: info | ok | warn | bad. The colored rule + icon tell you the kind at a glance.
+export function nudge(kind, name, title, desc, buttons = "") {
+  return `<div class="card nudge-card ${kind}"><div class="nudge"><span class="nic">${ic(name, { size: 18 })}</span><div class="grow"><div class="t">${title}</div>${desc ? `<div class="d">${desc}</div>` : ""}${buttons ? `<div class="btns">${buttons}</div>` : ""}</div></div></div>`;
+}
+
+export const emptyState = (name, html) => `<div class="card empty"><span class="empty-ic">${ic(name, { size: 26, stroke: 1.5 })}</span><div>${html}</div></div>`;

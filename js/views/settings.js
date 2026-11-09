@@ -1,7 +1,7 @@
 import { get, setSettings, commit, freshState, replaceState, mergeStates } from "../store.js";
 import { today, addDays } from "../dates.js";
 import { live, compute, round2 } from "../engine.js";
-import { esc, money, toast, copy, confirmSheet, sheet } from "../ui.js";
+import { esc, money, toast, copy, confirmSheet, sheet, ic, tile } from "../ui.js";
 import { newKey, validKey, cleanKey, sync, currentToken, deleteCloud } from "../sync.js";
 import { openBalanceCheck } from "../sheets.js";
 import { updateBadge } from "../badge.js";
@@ -14,7 +14,7 @@ export function renderSettings() {
   const st = s().settings;
   const goals = live(s().goals).filter((g) => g.type !== "stretch");
   const num = (k, label, help, suffix = "") => `<label class="f"><span>${label}</span><input class="in num" data-set="${k}" inputmode="decimal" value="${esc(st[k] ?? "")}">${help ? `<div class="tiny faint" style="margin:4px 4px 0">${help}${suffix}</div>` : ""}</label>`;
-  return `<header class="top"><div><h1>Settings</h1></div><a class="icon-btn" href="#/" aria-label="Back">‹</a></header>
+  return `<header class="top"><div><h1>Settings</h1></div><a class="icon-btn" href="#/" aria-label="Back">${ic("chevron-left", { size: 22 })}</a></header>
   <div class="card">
     <label class="f"><span>Your name</span><input class="in" data-set="name" value="${esc(st.name)}" placeholder="Optional" maxlength="30"></label>
     ${num("wage", "What you earn per hour", "Prices get shown as hours of work. A $60 hoodie is 4 hours at $15/hr.")}
@@ -27,15 +27,15 @@ export function renderSettings() {
     <label class="f"><span>Look</span><select class="in" data-set="theme"><option value="auto" ${st.theme === "auto" ? "selected" : ""}>Match my phone</option><option value="light" ${st.theme === "light" ? "selected" : ""}>Light</option><option value="dark" ${st.theme === "dark" ? "selected" : ""}>Dark</option></select></label>
   </div>
   <div class="list">
-    <button class="item" data-act="balance"><div class="ic">⚖️</div><div class="main"><div class="name">Match my bank balance</div><div class="meta">Fix drift from cash or anything you didn't log</div></div></button>
-    <a class="item" href="#/automate" style="color:inherit;text-decoration:none"><div class="ic">⚡</div><div class="main"><div class="name">Automations, widgets & sync</div><div class="meta">${s().meta.key ? "Sync is on" : "Apple Pay auto-logging, home & lock screen widgets"}</div></div></a>
-    <button class="item" data-act="why"><div class="ic">🧠</div><div class="main"><div class="name">How this app fights overspending</div><div class="meta">The research behind each feature</div></div></button>
+    <button class="item" data-act="balance">${tile("scale", "#56625b")}<div class="main"><div class="name">Match my bank balance</div><div class="meta">Fix drift from cash or anything you didn't log</div></div></button>
+    <a class="item" href="#/automate" style="color:inherit;text-decoration:none">${tile("zap", "#a0660f")}<div class="main"><div class="name">Automations, widgets & sync</div><div class="meta">${s().meta.key ? "Sync is on" : "Apple Pay auto-logging, home & lock screen widgets"}</div></div></a>
+    <button class="item" data-act="why">${tile("book-marked", "#55589c")}<div class="main"><div class="name">How this app fights overspending</div><div class="meta">The research behind each feature</div></div></button>
   </div>
   <div class="list">
-    <button class="item" data-act="export"><div class="ic">📤</div><div class="main"><div class="name">Export backup (JSON)</div></div></button>
-    <label class="item" style="cursor:pointer"><div class="ic">📥</div><div class="main"><div class="name">Import backup</div><div class="meta">Merges with what's here</div></div><input type="file" accept="application/json,.json" id="import" hidden></label>
-    <button class="item" data-act="onboard"><div class="ic">🔁</div><div class="main"><div class="name">Run setup again</div></div></button>
-    <button class="item" data-act="reset"><div class="ic">🗑️</div><div class="main"><div class="name over">Erase everything on this device</div></div></button>
+    <button class="item" data-act="export">${tile("upload", "#2f6690")}<div class="main"><div class="name">Export backup (JSON)</div></div></button>
+    <label class="item" style="cursor:pointer">${tile("download", "#2f6690")}<div class="main"><div class="name">Import backup</div><div class="meta">Merges with what's here</div></div><input type="file" accept="application/json,.json" id="import" hidden></label>
+    <button class="item" data-act="onboard">${tile("rotate-ccw", "#56625b")}<div class="main"><div class="name">Run setup again</div></div></button>
+    <button class="item" data-act="reset">${tile("trash-2", "#b3312a")}<div class="main"><div class="name over">Erase everything on this device</div></div></button>
   </div>
   <p class="tiny faint" style="text-align:center">Your data stays on this device. Cloud sync is end-to-end encrypted.</p>`;
 }
@@ -108,16 +108,16 @@ export const settingsActions = {
 
 function openWhy() {
   const items = [
-    ["🎯", "One number, not ten budgets", "Safe-to-spend spreads what you actually have (after bills and savings) evenly until your next money day. Apps like YNAB (\"In My Pocket\") and Copilot lead with a single number because it's what you can check in the 3 seconds before you buy."],
-    ["🪣", "Lump sums become a weekly paycheck", "MDRC's \"Aid Like A Paycheck\" trial paid financial aid every two weeks instead of in one lump. Students borrowed less in that first semester. Stretch funds copy that design for refunds and scholarships."],
-    ["💸", "Make paying feel like paying", "Research on the \"pain of paying\" (Prelec & Loewenstein) finds that cards and taps feel painless, so we spend more. Hours-of-work prices, the live \"leaves $X today\" line, and the red over-limit state bring that feeling back."],
+    ["target", "One number, not ten budgets", "Safe-to-spend spreads what you actually have (after bills and savings) evenly until your next money day. Apps like YNAB (\"In My Pocket\") and Copilot lead with a single number because it's what you can check in the 3 seconds before you buy."],
+    ["layers", "Lump sums become a weekly paycheck", "MDRC's \"Aid Like A Paycheck\" trial paid financial aid every two weeks instead of in one lump. Students borrowed less in that first semester. Stretch funds copy that design for refunds and scholarships."],
+    ["banknote", "Make paying feel like paying", "Research on the \"pain of paying\" (Prelec & Loewenstein) finds that cards and taps feel painless, so we spend more. Hours-of-work prices, the live \"leaves $X today\" line, and the red over-limit state bring that feeling back."],
     ["⏳", "A pause before the purchase", "Most impulse urges fade. The waitlist and \"Can I afford it?\" add a cooling-off period and show the real trade-off before you buy, when it can still change what you do."],
-    ["💪", "Count what you didn't spend", "Skipping something shows up as money not spent and can go straight to a goal, so saying no feels like a win, not a loss."],
-    ["🧠", "Learn your triggers", "Tagging why you bought something (bored, stressed, with friends) and rating it the next day reveals your patterns: which moods, days and late-night habits lead to purchases you regret."],
-    ["🤖", "Automate the boring parts", "Bills, paydays, saving to goals and round-ups happen on their own, and Apple Pay taps log themselves. Less effort means you keep using it."],
-    ["📏", "If-then rules", "Specific plans you write yourself (\"no delivery on weekdays\") are shown at the moment of decision. Implementation intentions like these work better than vague goals."],
+    ["piggy-bank", "Count what you didn't spend", "Skipping something shows up as money not spent and can go straight to a goal, so saying no feels like a win, not a loss."],
+    ["meh", "Learn your triggers", "Tagging why you bought something (bored, stressed, with friends) and rating it the next day reveals your patterns: which moods, days and late-night habits lead to purchases you regret."],
+    ["zap", "Automate the boring parts", "Bills, paydays, saving to goals and round-ups happen on their own, and Apple Pay taps log themselves. Less effort means you keep using it."],
+    ["signpost", "If-then rules", "Specific plans you write yourself (\"no delivery on weekdays\") are shown at the moment of decision. Implementation intentions like these work better than vague goals."],
   ];
-  const sh = sheet(() => `<h3>How it helps you overspend less<button data-close>Done</button></h3>${items.map(([e, t, d]) => `<div class="card"><div class="nudge"><div class="em">${e}</div><div><div class="t">${t}</div><div class="d">${d}</div></div></div></div>`).join("")}`);
+  const sh = sheet(() => `<h3>How it helps you overspend less<button data-close>Done</button></h3>${items.map(([e, t, d]) => `<div class="card"><div class="nudge"><span class="nic">${ic(e, { size: 18 })}</span><div><div class="t">${t}</div><div class="d">${d}</div></div></div></div>`).join("")}`);
   sh.bind = (el) => (el.querySelector("[data-close]").onclick = () => sh.close());
   sh.render();
 }
@@ -133,61 +133,61 @@ export function renderAutomate() {
   const wUrl = tok ? `${base}/api/widget?t=${tok}` : "";
   const last = st.meta.lastSync ? new Date(st.meta.lastSync).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "never";
   const urlBox = (u) => `<div class="code" data-copy="${esc(u)}">${esc(u)}</div><button class="btn sm ghost" style="margin-top:8px" data-act="copy" data-v="${esc(u)}">Copy link</button>`;
-  return `<header class="top"><div><h1>Automate</h1><div class="sub">Less typing, more knowing</div></div><a class="icon-btn" href="#/" aria-label="Back">‹</a></header>
+  return `<header class="top"><div><h1>Automate</h1><div class="sub">Less typing, more knowing</div></div><a class="icon-btn" href="#/" aria-label="Back">${ic("chevron-left", { size: 22 })}</a></header>
   <div class="card ${on ? "ok" : "accent"}">
-    <div class="nudge"><div class="em">${on ? "☁️" : "🔐"}</div><div class="grow">
+    <div class="nudge"><span class="nic">${ic(on ? "cloud" : "key-round", { size: 18 })}</span><div class="grow">
       <div class="t">${on ? "Sync is on" : "Turn on sync"}</div>
       <div class="d">${on ? `Last synced ${last}. Your budget is encrypted on this phone before upload. The server can't read it.` : "Needed for Apple Pay auto-logging, widgets and using more than one device. Everything is end-to-end encrypted with a key only you have."}</div>
       <div class="btns">${on ? `<button class="btn sm ghost" data-act="sync-now">Sync now</button><button class="btn sm ghost" data-act="show-key">Show my key</button>` : `<button class="btn sm primary" data-act="sync-on">Turn on</button><button class="btn sm ghost" data-act="sync-link">I have a key</button>`}</div>
     </div></div>
   </div>
   ${on ? `
-  <details class="card" open><summary>💳 Log every Apple Pay tap automatically</summary>
+  <details class="card" open><summary><span class="sum-l">${tile("credit-card", "#2e6a47")}Log every Apple Pay tap automatically</span></summary>
     <p class="small muted" style="margin-top:0">iPhone with iOS 17 or later. Each time you tap to pay, the amount and store are sent here. Next time you open the app they're filed under the right category (it learns from you).</p>
     <ol class="steps">
-      <li>Open <b>Shortcuts</b> → <b>Automation</b> tab → <b>＋</b> → <b>Transaction</b>.</li>
-      <li>Pick your cards, choose <b>Run Immediately</b>, turn off <b>Notify When Run</b>, tap <b>Next</b> → <b>New Blank Automation</b>.</li>
+      <li>Open <b>Shortcuts</b> › <b>Automation</b> tab › <b>+</b> › <b>Transaction</b>.</li>
+      <li>Pick your cards, choose <b>Run Immediately</b>, turn off <b>Notify When Run</b>, tap <b>Next</b> › <b>New Blank Automation</b>.</li>
       <li>Add the action <b>Get Contents of URL</b> and paste this link:</li>
     </ol>
     ${urlBox(logUrl)}
     <ol class="steps" start="4">
-      <li>Tap the arrow on that action: Method <b>POST</b>, Request Body <b>JSON</b>. Add 3 Text fields:<br><code>amount</code> → tap and pick <b>Shortcut Input › Amount</b><br><code>merchant</code> → <b>Merchant</b><br><code>card</code> → <b>Card</b> (or Name)</li>
+      <li>Tap the arrow on that action: Method <b>POST</b>, Request Body <b>JSON</b>. Add 3 Text fields:<br><code>amount</code> › tap and pick <b>Shortcut Input › Amount</b><br><code>merchant</code> › <b>Merchant</b><br><code>card</code> › <b>Card</b> (or Name)</li>
       <li>Optional but powerful: add <b>Show Notification</b> with <b>Contents of URL</b>. After every tap you'll see what's left today.</li>
     </ol>
     <p class="tiny faint">Only covers Apple Pay / Wallet taps. Card swipes and online checkouts still need a 3-second manual log, or use the widget below.</p>
   </details>
-  <details class="card"><summary>⚡ One-tap "Log spending" widget</summary>
+  <details class="card"><summary><span class="sum-l">${tile("zap", "#a0660f")}One-tap "Log spending" widget</span></summary>
     <p class="small muted" style="margin-top:0">A Shortcuts widget on your home screen (also works with Siri, the Action Button and Back Tap) to log cash or card spending without opening the app.</p>
     <ol class="steps">
-      <li>Shortcuts → <b>＋</b> new shortcut, name it <b>Log spend</b>.</li>
-      <li>Add <b>Ask for Input</b> → Type <b>Number</b>, prompt "How much?"</li>
-      <li>Add <b>Ask for Input</b> → Type <b>Text</b>, prompt "Where?"</li>
-      <li>Add <b>Get Contents of URL</b> with the link below. Method POST, Body JSON: <code>amount</code> → first Provided Input, <code>merchant</code> → second Provided Input.</li>
-      <li>Add <b>Show Notification</b> → <b>Contents of URL</b>.</li>
-      <li>Long-press your home screen → Edit → Add Widget → <b>Shortcuts</b> → pick <b>Log spend</b>.</li>
+      <li>Shortcuts › <b>+</b> new shortcut, name it <b>Log spend</b>.</li>
+      <li>Add <b>Ask for Input</b> › Type <b>Number</b>, prompt "How much?"</li>
+      <li>Add <b>Ask for Input</b> › Type <b>Text</b>, prompt "Where?"</li>
+      <li>Add <b>Get Contents of URL</b> with the link below. Method POST, Body JSON: <code>amount</code> › first Provided Input, <code>merchant</code> › second Provided Input.</li>
+      <li>Add <b>Show Notification</b> › <b>Contents of URL</b>.</li>
+      <li>Long-press your home screen › Edit › Add Widget › <b>Shortcuts</b> › pick <b>Log spend</b>.</li>
     </ol>
     ${urlBox(logUrl)}
   </details>
-  <details class="card"><summary>📱 Safe-to-spend widget (home + lock screen)</summary>
+  <details class="card"><summary><span class="sum-l">${tile("smartphone", "#2f6690")}Safe-to-spend widget for your home and lock screen</span></summary>
     <p class="small muted" style="margin-top:0">Shows today's number where you'll see it before you buy. Uses the free <b>Scriptable</b> app. Updates with every Apple Pay tap and shortcut log, even if you don't open the budget app.</p>
     <ol class="steps">
       <li>Install <b>Scriptable</b> from the App Store.</li>
-      <li>Open it, tap <b>＋</b>, paste the script (button below), name it <b>Budget</b>.</li>
-      <li>Home screen: long-press → Edit → Add Widget → Scriptable → Small. Tap it → Script: <b>Budget</b>.</li>
-      <li>Lock screen: long-press lock screen → Customize → Lock Screen → add Scriptable (rectangular or inline) → Script: <b>Budget</b>.</li>
+      <li>Open it, tap <b>+</b>, paste the script (button below), name it <b>Budget</b>.</li>
+      <li>Home screen: long-press › Edit › Add Widget › Scriptable › Small. Tap it › Script: <b>Budget</b>.</li>
+      <li>Lock screen: long-press lock screen › Customize › Lock Screen › add Scriptable (rectangular or inline) › Script: <b>Budget</b>.</li>
     </ol>
     <button class="btn block primary" data-act="copy-script">Copy widget script</button>
   </details>
-  <details class="card"><summary>🔔 Daily check-in notifications</summary>
+  <details class="card"><summary><span class="sum-l">${tile("bell", "#94468a")}Daily check-in notifications</span></summary>
     <p class="small muted" style="margin-top:0">A morning heads-up of what you can spend, and an evening reminder to log anything missed.</p>
     <ol class="steps">
-      <li>Shortcuts → Automation → <b>＋</b> → <b>Time of Day</b> → 9:00 AM, Daily, <b>Run Immediately</b>.</li>
-      <li>Add <b>Get Contents of URL</b> with the link below, then <b>Show Notification</b> → <b>Contents of URL</b>.</li>
+      <li>Shortcuts › Automation › <b>+</b> › <b>Time of Day</b> › 9:00 AM, Daily, <b>Run Immediately</b>.</li>
+      <li>Add <b>Get Contents of URL</b> with the link below, then <b>Show Notification</b> › <b>Contents of URL</b>.</li>
       <li>Repeat for 9:00 PM. Add the text "Anything to log?" before the Contents of URL.</li>
     </ol>
     ${urlBox(wUrl + "&format=text")}
   </details>
-  <details class="card"><summary>🤖 Android</summary>
+  <details class="card"><summary><span class="sum-l">${tile("smartphone", "#56625b")}Android</span></summary>
     <ol class="steps">
       <li>Long-press the app icon for quick <b>Log spending</b> and <b>Can I afford it?</b> shortcuts. Drag one to your home screen.</li>
       <li>Auto-log: in <b>MacroDroid</b> or <b>Tasker</b>, trigger on your bank or Google Wallet notification, read the amount, then make an HTTP POST to the log link with <code>amount</code> and <code>merchant</code> fields.</li>
@@ -248,7 +248,7 @@ if (fam === "accessoryInline") {
   const a = w.addText(d.ok ? fmt(Math.abs(d.left)) : "Open app"); a.font = Font.heavyRoundedSystemFont(fam === "small" ? 34 : 40); a.textColor = Color.white(); a.minimumScaleFactor = 0.5; a.lineLimit = 1;
   w.addSpacer();
   const t = w.addText(d.ok ? (d.status === "over" && d.tomorrow != null ? "Tomorrow " + fmt(d.tomorrow) + "/day" : fmt(d.daily) + "/day, " + d.daysLeft + " days left") : d.text || ""); t.font = Font.mediumSystemFont(12); t.textColor = new Color("#ffffff", 0.9); t.minimumScaleFactor = 0.7;
-  if (d.ok && d.streak > 0 && fam !== "small") { const s = w.addText("🔥 " + d.streak + " no-spend days"); s.font = Font.systemFont(11); s.textColor = new Color("#ffffff", 0.85); }
+  if (d.ok && d.streak > 0 && fam !== "small") { const s = w.addText(d.streak + "-day no-spend streak"); s.font = Font.systemFont(11); s.textColor = new Color("#ffffff", 0.85); }
 }
 Script.setWidget(w);
 if (config.runsInApp) await w.presentSmall();
@@ -273,7 +273,7 @@ export const automateActions = {
   },
   "show-key": () => showKey(s().meta.key),
   "sync-link": () => {
-    const sh = sheet(() => `<h3>Link this device<button data-close>Cancel</button></h3><p class="muted small">Enter the sync key from your other device (Automate → Show my key). Both devices will merge.</p>
+    const sh = sheet(() => `<h3>Link this device<button data-close>Cancel</button></h3><p class="muted small">Enter the sync key from your other device (Automate › Show my key). Both devices will merge.</p>
       <label class="f"><input class="in" id="k" placeholder="XXXXX-XXXXX-XXXXX-XXXXX" autocapitalize="characters" autocomplete="off"></label><button class="btn primary block" id="go">Link</button>`);
     sh.bind = (el) => {
       el.querySelector("[data-close]").onclick = () => sh.close();
@@ -285,7 +285,7 @@ export const automateActions = {
         commit({ sync: false });
         tokenCache = null;
         sh.close();
-        try { await sync(); toast("Linked and synced ☁️"); } catch (e) { toast("Linked. Sync will retry when online."); }
+        try { await sync(); toast("Linked and synced"); } catch (e) { toast("Linked. Sync will retry when online."); }
         if (s().settings.onboarded === false && live(s().tx).length) setSettings({ onboarded: true });
       };
     };
@@ -304,7 +304,7 @@ export const automateActions = {
 };
 
 function showKey(key, fresh) {
-  const sh = sheet(() => `<h3>${fresh ? "Sync is on ☁️" : "Your sync key"}<button data-close>Done</button></h3>
+  const sh = sheet(() => `<h3>${fresh ? "Sync is on" : "Your sync key"}<button data-close>Done</button></h3>
     <p class="muted small">This key unlocks your encrypted budget. Use it to add another device. Save it in your password manager. If you lose all your devices and this key, the cloud copy can't be recovered (not even by the server).</p>
     <div class="code" style="font-size:20px;text-align:center;letter-spacing:0.05em">${esc(key)}</div>
     <button class="btn block ghost" style="margin-top:10px" data-c>Copy key</button>

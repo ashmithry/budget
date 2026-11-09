@@ -2,7 +2,7 @@
 import { get, put, setSettings, runAutomation } from "../store.js";
 import { today, addDays, diffDays, FREQS, dayOfMonth } from "../dates.js";
 import { compute, uid, round2 } from "../engine.js";
-import { esc, money, toast } from "../ui.js";
+import { esc, money, toast, ic, tile, chip, nudge } from "../ui.js";
 import { automateActions } from "./settings.js";
 
 const s = () => get();
@@ -44,22 +44,22 @@ export function renderOnboard() {
     ${o.incomes.map((i, n) => `<div class="card"><div class="row between" style="margin-bottom:8px"><b>${esc(i.name)}</b><button class="small over" data-ob="inc-del" data-i="${n}">Remove</button></div>
       <div class="two"><div class="in-money" data-cur="${cur()}"><input class="in num" data-inc="${n}" data-k="amount" inputmode="decimal" placeholder="Amount" value="${esc(i.amount)}"></div>${freqSel(i.freq, `data-inc="${n}" data-k="freq"`)}</div>
       <label class="f" style="margin:8px 0 0"><span>Next one arrives</span><input class="in" type="date" data-inc="${n}" data-k="next" value="${i.next}"></label></div>`).join("")}
-    ${o.lump ? `<div class="card"><div class="row between" style="margin-bottom:8px"><b>🪣 Lump sum to stretch</b><button class="small over" data-ob="lump-del">Remove</button></div>
+    ${o.lump ? `<div class="card"><div class="row between" style="margin-bottom:8px"><b class="row" style="gap:10px">${tile("layers", "#a0660f")}Lump sum to stretch</b><button class="small over" data-ob="lump-del">Remove</button></div>
       <div class="two"><div class="in-money" data-cur="${cur()}"><input class="in num" data-lump="amount" inputmode="decimal" placeholder="Amount" value="${esc(o.lump.amount)}"></div><input class="in" data-lump="name" value="${esc(o.lump.name)}"></div>
       <label class="f" style="margin:8px 0 0"><span>Make it last until</span><input class="in" type="date" data-lump="until" value="${o.lump.until}"></label>
-      <label class="switch" style="margin:8px 0 0;box-shadow:none;background:var(--card2)"><span class="small">Already included in the amount on the last screen</span><input type="checkbox" data-lump="inBalance" ${o.lump.inBalance ? "checked" : ""}></label></div>` : ""}
+      <label class="switch" style="margin:8px 0 0;box-shadow:none;background:var(--sunk)"><span class="small">Already included in the amount on the last screen</span><input type="checkbox" data-lump="inBalance" ${o.lump.inBalance ? "checked" : ""}></label></div>` : ""}
     <div class="chips">
-      <button class="chip-btn" data-ob="inc-add" data-name="Job" data-freq="biweekly">＋ Paycheck</button>
-      <button class="chip-btn" data-ob="inc-add" data-name="From family" data-freq="monthly">＋ Money from family</button>
-      ${o.lump ? "" : `<button class="chip-btn" data-ob="lump-add">＋ Aid refund / scholarship</button>`}
+      ${chip("plus", "Paycheck", false, `data-ob="inc-add" data-name="Job" data-freq="biweekly"`)}
+      ${chip("plus", "Money from family", false, `data-ob="inc-add" data-name="From family" data-freq="monthly"`)}
+      ${o.lump ? "" : chip("plus", "Aid refund or scholarship", false, `data-ob="lump-add"`)}
     </div>
     <div class="foot"><button class="btn primary block" data-ob="next">${o.incomes.length || o.lump ? "Next" : "Skip for now"}</button><button class="btn ghost block" data-ob="back">Back</button></div></div>`;
   if (st === 3) return `<div class="onb">${dots()}
     <h1>Bills & subscriptions</h1>
     <p class="lead">These get set aside before your daily number, and log themselves on the due date. Add all of them. Small subscriptions add up.</p>
-    ${o.bills.map((b, n) => `<div class="card"><div class="row between" style="margin-bottom:8px"><input class="in" data-bill="${n}" data-k="name" value="${esc(b.name)}" placeholder="Name" style="min-height:40px"><button class="small over" data-ob="bill-del" data-i="${n}" style="margin-left:8px">✕</button></div>
+    ${o.bills.map((b, n) => `<div class="card"><div class="row between" style="margin-bottom:8px"><input class="in" data-bill="${n}" data-k="name" value="${esc(b.name)}" placeholder="Name" style="min-height:40px"><button class="small over" data-ob="bill-del" data-i="${n}" style="margin-left:4px" aria-label="Remove">${ic("x", { size: 20 })}</button></div>
       <div class="two"><div class="in-money" data-cur="${cur()}"><input class="in num" data-bill="${n}" data-k="amount" inputmode="decimal" placeholder="Amount" value="${esc(b.amount)}"></div><input class="in" type="date" data-bill="${n}" data-k="next" value="${b.next}" aria-label="Next due"></div></div>`).join("")}
-    <div class="chips">${[["Rent", "bill"], ["Phone", "bill"], ["Spotify", "sub"], ["Netflix", "sub"], ["Apple Music", "sub"], ["iCloud+", "sub"], ["Amazon Prime", "sub"], ["Gym", "sub"], ["Car insurance", "bill"], ["Other", "sub"]].map(([n, k]) => `<button class="chip-btn" data-ob="bill-add" data-name="${n === "Other" ? "" : n}" data-kind="${k}">＋ ${n}</button>`).join("")}</div>
+    <div class="chips">${[["Rent", "bill"], ["Phone", "bill"], ["Spotify", "sub"], ["Netflix", "sub"], ["Apple Music", "sub"], ["iCloud+", "sub"], ["Amazon Prime", "sub"], ["Gym", "sub"], ["Car insurance", "bill"], ["Other", "sub"]].map(([n, k]) => chip("plus", n, false, `data-ob="bill-add" data-name="${n === "Other" ? "" : n}" data-kind="${k}"`)).join("")}</div>
     <p class="tiny faint" style="margin:10px 4px">All monthly by default. Change how often later in Plan.</p>
     <div class="foot"><button class="btn primary block" data-ob="next">${o.bills.length ? "Next" : "No bills, skip"}</button><button class="btn ghost block" data-ob="back">Back</button></div></div>`;
   if (st === 4) return `<div class="onb">${dots()}
@@ -68,7 +68,7 @@ export function renderOnboard() {
     <label class="f"><span>What you earn per hour (or would)</span><div class="in-money" data-cur="${cur()}"><input class="in num" id="wage" inputmode="decimal" value="${esc(o.wage)}"></div><div class="tiny faint" style="margin:4px">Prices get shown as hours of your life. $60 = ${o.wage > 0 ? Math.round((60 / o.wage) * 10) / 10 : "?"} hours.</div></label>
     <div class="small muted" style="margin:0 4px 8px;font-weight:600">Before buying things you want, wait…</div>
     <div class="chips" style="margin-bottom:16px">${[24, 48, 72].map((h) => `<button class="chip-btn ${o.cool === h ? "on" : ""}" data-ob="cool" data-h="${h}">${h} hours</button>`).join("")}</div>
-    <div class="card"><b>🛟 Start a savings goal</b><p class="small muted" style="margin:4px 0 10px">Saved automatically each payday, before you can spend it.</p>
+    <div class="card"><b class="row" style="gap:10px">${tile("life-buoy", "#55589c")}Start a savings goal</b><p class="small muted" style="margin:4px 0 10px">Saved automatically each payday, before you can spend it.</p>
       <div class="two"><input class="in" id="gname" value="${esc(o.goal.name)}" placeholder="Goal"><div class="in-money" data-cur="${cur()}"><input class="in num" id="gtarget" inputmode="decimal" placeholder="Target" value="${esc(o.goal.target)}"></div></div>
       ${o.incomes.length ? `<label class="f" style="margin:8px 0 0"><span>Save each payday</span><div class="in-money" data-cur="${cur()}"><input class="in num" id="gper" inputmode="decimal" placeholder="e.g. 25" value="${esc(o.goal.perPay)}"></div></label>` : ""}</div>
     <div class="foot"><button class="btn primary block" data-ob="finish">Finish</button><button class="btn ghost block" data-ob="back">Back</button></div></div>`;
@@ -77,7 +77,7 @@ export function renderOnboard() {
     <div class="welcome" style="margin-top:6vh">
     <h1>You can safely spend <span class="good">${money(Math.max(0, c.leftToday))}</span> today.</h1>
     <p class="lead">That's ${money(c.dailyBase)} a day until ${c.daysLeft > 1 ? "your next money day" : "tomorrow"}${c.upcomingTotal ? `, after setting aside ${money(c.upcomingTotal)} for bills` : ""}. Spend less today and tomorrow's number goes up. Go over and it goes down.</p>
-    <div class="card accent"><div class="nudge"><div class="em">🤖</div><div><div class="t">One more thing</div><div class="d">Turn on sync to log Apple Pay taps automatically and put this number on your home and lock screen.</div></div></div></div></div>
+    ${nudge("info", "credit-card", "One more thing", "Turn on sync to log Apple Pay taps automatically and put this number on your home and lock screen.")}</div>
     <div class="foot"><button class="btn primary block" data-ob="auto">Set up automation</button><button class="btn ghost block" data-ob="done">Maybe later</button></div></div>`;
 }
 
@@ -104,11 +104,11 @@ function finish() {
     // If the lump sum is bigger than the balance they gave, it can't already be in it: treat it as new money.
     if (o.lump.inBalance && amt > n(o.balance)) o.lump.inBalance = false;
     if (!o.lump.inBalance) put("tx", { id: uid(), kind: "income", amount: amt, note: o.lump.name, cat: "income", date: t, ts: now + 1, source: "manual" });
-    put("goals", { id, type: "stretch", name: o.lump.name || "Lump sum", emoji: "🪣", target: amt, start: 0, perRelease: round2(amt / weeks), freq: "weekly", next: t, until: o.lump.until });
+    put("goals", { id, type: "stretch", name: o.lump.name || "Lump sum", icon: "layers", target: amt, start: 0, perRelease: round2(amt / weeks), freq: "weekly", next: t, until: o.lump.until });
     put("tx", { id: uid(), kind: "save", amount: amt, goalId: id, note: `${o.lump.name} set aside`, date: t, ts: now + 2, source: "manual" });
   }
   for (const b of o.bills) if (b.name && n(b.amount) > 0) put("bills", { id: uid(), name: b.name, amount: n(b.amount), freq: "monthly", next: b.next < t ? t : b.next, day: dayOfMonth(b.next), kind: b.kind, cat: b.kind === "bill" ? "bills" : "subs" });
-  if (o.goal.name && (n(o.goal.target) > 0 || n(o.goal.perPay) > 0)) put("goals", { id: uid(), type: "goal", name: o.goal.name, emoji: "🛟", target: n(o.goal.target), perPay: n(o.goal.perPay), start: 0 });
+  if (o.goal.name && (n(o.goal.target) > 0 || n(o.goal.perPay) > 0)) put("goals", { id: uid(), type: "goal", name: o.goal.name, icon: "life-buoy", target: n(o.goal.target), perPay: n(o.goal.perPay), start: 0 });
   // Bills due today post now; today's stretch release goes out.
   runAutomation();
 }
@@ -126,7 +126,7 @@ export const onboardActions = {
   cool: (el) => { o.cool = Number(el.dataset.h); },
   finish: () => { finish(); o.step = 5; },
   auto: () => { setSettings({ onboarded: true }); runAutomation(); location.hash = "#/automate"; },
-  done: () => { setSettings({ onboarded: true }); runAutomation(); location.hash = "#/"; toast("You're set. Log your first spend with ＋"); },
+  done: () => { setSettings({ onboarded: true }); runAutomation(); location.hash = "#/"; toast("You're set. Log your first spend with the plus button."); },
 };
 
 export function onboardBefore(root) { readInputs(root); }

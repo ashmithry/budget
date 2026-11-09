@@ -5,28 +5,29 @@ export const live = (arr) => (arr || []).filter((x) => x && !x.deleted);
 export const round2 = (n) => Math.round(n * 100) / 100;
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
+// Each category has a Lucide icon and its own muted ink color (shown as a tinted tile).
 export const DEFAULT_CATS = [
-  { id: "groceries", name: "Groceries", emoji: "🛒", limit: 150 },
-  { id: "food", name: "Eating out", emoji: "🍔", limit: 120 },
-  { id: "coffee", name: "Coffee & snacks", emoji: "☕", limit: 40 },
-  { id: "transport", name: "Transport", emoji: "🚌", limit: 60 },
-  { id: "school", name: "School", emoji: "📚", limit: 40 },
-  { id: "fun", name: "Fun & going out", emoji: "🎉", limit: 80 },
-  { id: "shopping", name: "Shopping", emoji: "🛍️", limit: 60 },
-  { id: "personal", name: "Personal care", emoji: "🧴", limit: 30 },
-  { id: "subs", name: "Subscriptions", emoji: "📺", limit: 0, fixed: true },
-  { id: "bills", name: "Rent & bills", emoji: "🏠", limit: 0, fixed: true },
-  { id: "other", name: "Other", emoji: "📦", limit: 40 },
+  { id: "groceries", name: "Groceries", icon: "shopping-cart", color: "#3f7d57", limit: 150 },
+  { id: "food", name: "Eating out", icon: "utensils", color: "#b4552e", limit: 120 },
+  { id: "coffee", name: "Coffee & snacks", icon: "coffee", color: "#8a5a36", limit: 40 },
+  { id: "transport", name: "Transport", icon: "bus", color: "#2f6690", limit: 60 },
+  { id: "school", name: "School", icon: "book-open", color: "#55589c", limit: 40 },
+  { id: "fun", name: "Fun & going out", icon: "ticket", color: "#94468a", limit: 80 },
+  { id: "shopping", name: "Shopping", icon: "shopping-bag", color: "#ad3d5a", limit: 60 },
+  { id: "personal", name: "Personal care", icon: "droplets", color: "#2c8584", limit: 30 },
+  { id: "subs", name: "Subscriptions", icon: "repeat", color: "#64689a", limit: 0, fixed: true },
+  { id: "bills", name: "Rent & bills", icon: "key-round", color: "#56625b", limit: 0, fixed: true },
+  { id: "other", name: "Other", icon: "package", color: "#7a7f72", limit: 40 },
 ];
 
 export const MOODS = [
-  { id: "need", label: "Needed it", emoji: "✅" },
-  { id: "treat", label: "Treat", emoji: "🎁" },
-  { id: "bored", label: "Bored", emoji: "🥱" },
-  { id: "stressed", label: "Stressed", emoji: "😩" },
-  { id: "social", label: "Friends", emoji: "👯" },
-  { id: "hungry", label: "Hungry", emoji: "🍟" },
-  { id: "deal", label: "Saw a deal", emoji: "🏷️" },
+  { id: "need", label: "Needed it", icon: "check" },
+  { id: "treat", label: "Treat", icon: "gift" },
+  { id: "bored", label: "Bored", icon: "meh" },
+  { id: "stressed", label: "Stressed", icon: "frown" },
+  { id: "social", label: "Friends", icon: "users" },
+  { id: "hungry", label: "Hungry", icon: "pizza" },
+  { id: "deal", label: "Saw a deal", icon: "tag" },
 ];
 
 // Money in vs. out for each kind of record. Expenses can be negative (refunds).
@@ -145,7 +146,7 @@ export function impact(state, price, cat, t = today()) {
   else if (leftAfter < 0) verdict = p > c.pool * 0.35 ? "no" : "tight";
   else if (budget && budget.leftAfter < 0) verdict = "tight";
   const goals = live(state.goals).filter((g) => g.type !== "stretch" && Number(g.target) > goalSaved(state, g.id));
-  const goal = goals[0] ? { name: goals[0].name, emoji: goals[0].emoji, pct: Math.round((p / Number(goals[0].target)) * 100) } : null;
+  const goal = goals[0] ? { name: goals[0].name, icon: goals[0].icon, pct: Math.round((p / Number(goals[0].target)) * 100) } : null;
   return { ...c, price: p, leftAfter, poolAfter, dailyAfter, overToday, hours, budget, verdict, goal };
 }
 
@@ -153,7 +154,7 @@ export function categories(state) {
   const cats = live(state.cats);
   return cats.length ? cats : DEFAULT_CATS;
 }
-export const catById = (state, id) => categories(state).find((c) => c.id === id) || { id: id || "other", name: "Other", emoji: "📦", limit: 0 };
+export const catById = (state, id) => categories(state).find((c) => c.id === id) || { id: id || "other", name: "Other", icon: "package", color: "#7a7f72", limit: 0 };
 
 export function categoryMonth(state, t = today()) {
   const start = monthStart(t);

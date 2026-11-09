@@ -1,7 +1,7 @@
 import { get } from "../store.js";
 import { today, addDays, pretty, monthStart, daysInMonth, weekday, monthName, dowName } from "../dates.js";
 import { live, flexOn, catById, round2, isFlex } from "../engine.js";
-import { esc, money } from "../ui.js";
+import { esc, money, ic, emptyState } from "../ui.js";
 import { txRow } from "./home.js";
 import { openAdd, openBalanceCheck } from "../sheets.js";
 
@@ -62,17 +62,17 @@ export function renderActivity() {
   const prevMonth = addDays(mStart, -1);
   const nextMonth = addDays(mEnd, 1);
   return `
-  <header class="top"><div><h1>Activity</h1><div class="sub">${money(monthSpent)} out and ${money(monthIn)} in during ${monthName(month)}</div></div>
-    <button class="icon-btn" data-act="income" aria-label="Add money in">💰</button></header>
+  <header class="top"><div><h1>Activity</h1><div class="sub">${money(monthSpent)} spent${monthIn ? `, ${money(monthIn)} came in` : ""} in ${monthName(month)}</div></div>
+    <button class="icon-btn" data-act="income" aria-label="Add money in">${ic("banknote", { size: 19 })}</button></header>
   <div class="card">
     <div class="row between" style="margin-bottom:10px">
-      <button class="btn sm ghost" data-act="month" data-m="${prevMonth}" aria-label="Previous month">‹</button>
+      <button class="btn sm ghost" data-act="month" data-m="${prevMonth}" aria-label="Previous month">${ic("chevron-left", { size: 20 })}</button>
       <div style="font-weight:700">${monthName(month)} ${month.slice(0, 4)}</div>
-      <button class="btn sm ghost" data-act="month" data-m="${nextMonth}" ${nextMonth > t ? "disabled" : ""} aria-label="Next month">›</button>
+      <button class="btn sm ghost" data-act="month" data-m="${nextMonth}" ${nextMonth > t ? "disabled" : ""} aria-label="Next month">${ic("chevron-right", { size: 20 })}</button>
     </div>
     ${cal.html}
     <div class="row small muted" style="margin-top:10px;gap:14px;flex-wrap:wrap">
-      <span><span class="tag ok" style="background:var(--good);color:#fff;margin:0">■</span> no-spend (${cal.ns})</span>
+      <span><span class="tag ok" style="background:var(--green);color:#fff;margin:0">■</span> no-spend (${cal.ns})</span>
       <span><span class="tag ok" style="margin:0">■</span> under limit (${cal.under})</span>
       <span><span class="tag bad" style="margin:0">■</span> over</span>
     </div>
@@ -82,9 +82,9 @@ export function renderActivity() {
   ${groups.length ? groups.map((g) => {
     const dayTotal = round2(g.items.filter(isFlex).reduce((a, x) => a + Number(x.amount), 0));
     return `<div class="day-head"><span>${pretty(g.date)}</span><span class="num">${dayTotal ? money(dayTotal) : ""}</span></div><div class="list">${g.items.map(txRow).join("")}</div>`;
-  }).join("") : `<div class="card empty"><div class="em">🧾</div>${q || ui.f !== "all" ? "Nothing matches." : "Nothing logged yet. Tap ＋ to log your first spend."}</div>`}
+  }).join("") : emptyState("receipt-text", q || ui.f !== "all" ? "Nothing matches that search." : "Nothing logged yet. Tap the plus button to log your first spend.")}
   ${txs.length > ui.limit ? `<button class="btn block ghost" data-act="more">Show more</button>` : ""}
-  <button class="btn block ghost" data-act="balance" style="margin-top:14px">⚖️ Match my bank balance</button>`;
+  <button class="btn block ghost" data-act="balance" style="margin-top:14px">${ic("scale", { size: 18 })}Match my bank balance</button>`;
 }
 
 export const activityActions = {

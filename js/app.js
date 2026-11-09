@@ -2,7 +2,7 @@
 import { get, subscribe, runAutomation, commit } from "./store.js";
 import { today } from "./dates.js";
 import { guessCategory, live } from "./engine.js";
-import { $, icon, toast, money, closeAllSheets } from "./ui.js";
+import { $, icon, toast, money, closeAllSheets, inl, nudge, plural } from "./ui.js";
 import { openAdd, openAfford } from "./sheets.js";
 import { sync, pushSnapshotSoon } from "./sync.js";
 import { updateBadge } from "./badge.js";
@@ -29,8 +29,8 @@ const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.
 
 function installBanner() {
   if (isStandalone() || get().settings.hideInstall) return "";
-  const how = isIOS() ? "Tap <b>Share</b> <span aria-hidden=\"true\">⬆️</span> then <b>Add to Home Screen</b>." : "Use your browser menu → <b>Install app</b> / <b>Add to Home screen</b>.";
-  return `<div class="card accent"><div class="nudge"><div class="em">📲</div><div class="grow"><div class="t">Put this on your home screen</div><div class="d">${how} It opens full-screen like a real app, works offline, and can show a badge.</div><div class="btns"><button class="btn sm ghost" data-act="hide-install">Got it</button></div></div></div></div>`;
+  const how = isIOS() ? `Tap <b>Share</b> ${inl("share")} then <b>Add to Home Screen</b>.` : "Use your browser menu → <b>Install app</b> / <b>Add to Home screen</b>.";
+  return nudge("info", "smartphone", "Put this on your home screen", `${how} It opens full-screen like a real app, works offline, and can show a badge.`, `<button class="btn sm ghost" data-act="hide-install">Got it</button>`);
 }
 ACTIONS["hide-install"] = () => { get().settings.hideInstall = true; commit({ sync: false }); };
 
@@ -121,8 +121,8 @@ let lastDay = today();
 function tick() {
   const events = runAutomation();
   const pays = events.filter((e) => e.type === "payday");
-  if (pays.length) toast(`💰 Payday logged: ${money(pays.reduce((a, p) => a + Number(p.amount), 0))}`);
-  else if (events.some((e) => e.type === "bill")) toast(`🧾 ${events.filter((e) => e.type === "bill").length} bill(s) logged automatically`);
+  if (pays.length) toast(`Payday logged: ${money(pays.reduce((a, p) => a + Number(p.amount), 0))}`);
+  else if (events.some((e) => e.type === "bill")) toast(`${plural(events.filter((e) => e.type === "bill").length, "bill")} logged automatically`);
   lastDay = today();
   scheduleRender();
   updateBadge();
@@ -143,7 +143,7 @@ async function doSync() {
         }
       },
     });
-    if (r?.added) toast(`⚡ ${r.added} purchase${r.added > 1 ? "s" : ""} logged automatically`);
+    if (r?.added) toast(`${r.added} purchase${r.added > 1 ? "s" : ""} logged automatically`);
     runAutomation();
     scheduleRender();
   } catch (e) {
