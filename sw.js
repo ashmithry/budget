@@ -1,10 +1,10 @@
 // Offline support: network first (so updates show up right away), cached copy when offline.
-const CACHE = "budget-v1";
+const CACHE = "budget-v2";
 const SHELL = [
   "/", "/index.html", "/manifest.webmanifest", "/css/app.css",
   "/js/app.js", "/js/store.js", "/js/engine.js", "/js/dates.js", "/js/ui.js", "/js/sheets.js", "/js/sync.js", "/js/badge.js",
   "/js/views/home.js", "/js/views/activity.js", "/js/views/plan.js", "/js/views/insights.js", "/js/views/settings.js", "/js/views/onboard.js",
-  "/icons/icon.svg", "/icons/icon-192.png", "/icons/apple-touch-icon.png",
+  "/icons/icon.svg", "/icons/icon-192.png", "/icons/apple-touch-icon.png", "/icons/rosette.svg", "/fonts/bricolage-latin.woff2",
 ];
 
 self.addEventListener("install", (e) => {

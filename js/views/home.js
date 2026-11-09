@@ -6,12 +6,6 @@ import { openAdd, openAfford, skipItem } from "../sheets.js";
 
 const s = () => get();
 
-function ring(frac) {
-  const r = 31;
-  const c = 2 * Math.PI * r;
-  const f = Math.max(0, Math.min(1, frac));
-  return `<svg class="ring" viewBox="0 0 74 74" aria-hidden="true"><circle class="bg" cx="37" cy="37" r="${r}"/><circle class="fg" cx="37" cy="37" r="${r}" stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - f)}"/><text x="37" y="37">${Math.round(f * 100)}%</text></svg>`;
-}
 
 function greeting() {
   const h = new Date().getHours();
@@ -31,7 +25,7 @@ function txRow(tx) {
     tx.worth === "no" ? `<span class="tag bad">regret</span>` : "",
   ].join("");
   const name = tx.note || (tx.kind === "expense" ? c.name : tx.kind === "income" ? "Money in" : tx.kind === "save" ? "Saved" : "Adjustment");
-  const meta = tx.kind === "expense" ? `${esc(c.name)}${mood ? ` · ${mood.emoji} ${mood.label}` : ""}` : tx.kind === "save" ? "Set aside" : tx.kind === "unsave" ? "Released to spend" : tx.kind === "income" ? "Income" : "Balance fix";
+  const meta = tx.kind === "expense" ? `${esc(c.name)}${mood ? `, ${mood.label.toLowerCase()}` : ""}` : tx.kind === "save" ? "Set aside" : tx.kind === "unsave" ? "Released to spend" : tx.kind === "income" ? "Income" : "Balance fix";
   const sign = isIn ? "+" : tx.kind === "expense" || tx.kind === "save" || tx.kind === "adjust" ? "" : "";
   return `<button class="item" data-tx="${esc(tx.id)}"><div class="ic">${icon_}</div><div class="main"><div class="name">${esc(name)}${tags}</div><div class="meta">${meta}</div></div><div class="amt num ${isIn ? "pos" : ""}">${sign}${money(Math.abs(tx.amount))}</div></button>`;
 }
@@ -72,7 +66,7 @@ function nudges(c) {
   if ((wd === 0 || wd === 1) && st.settings.reviewSeen !== wkKey && st.settings.startDate <= addDays(t, -5)) {
     const w = weekReview(st);
     const diff = w.prevSpent ? Math.round(((w.spent - w.prevSpent) / w.prevSpent) * 100) : null;
-    out.push(`<div class="card accent"><div class="nudge"><div class="em">📊</div><div class="grow"><div class="t">Your week: ${money(w.spent)} spent</div><div class="d">${w.tracked ? `${w.under}/${w.tracked} days under your limit · ` : ""}${plural(w.noSpend, "no-spend day")}${diff != null ? ` · ${diff <= 0 ? `${-diff}% less` : `${diff}% more`} than last week` : ""}${w.topCat ? ` · most on ${esc(catById(st, w.topCat.id).name)} (${money(w.topCat.total)})` : ""}.</div><div class="btns"><a class="btn sm primary" href="#/insights">See insights</a><button class="btn sm ghost" data-act="review-seen" data-wk="${wkKey}">Got it</button></div></div></div></div>`);
+    out.push(`<div class="card accent"><div class="nudge"><div class="em">📊</div><div class="grow"><div class="t">Your week: ${money(w.spent)} spent</div><div class="d">${[w.tracked ? `${w.under} of ${w.tracked} days under your limit` : "", plural(w.noSpend, "no-spend day"), diff != null ? `${diff <= 0 ? `${-diff}% less` : `${diff}% more`} than the week before` : "", w.topCat ? `most on ${esc(catById(st, w.topCat.id).name.toLowerCase())} (${money(w.topCat.total)})` : ""].filter(Boolean).join(", ").replace(/^./, (m) => m.toUpperCase())}.</div><div class="btns"><a class="btn sm primary" href="#/insights">See insights</a><button class="btn sm ghost" data-act="review-seen" data-wk="${wkKey}">Got it</button></div></div></div></div>`);
   }
   // 8. budgets running hot
   const hot = categoryMonth(st).filter((x) => x.limit > 0 && (x.state === "over" || x.state === "ahead")).sort((a, b) => b.pct - a.pct);
@@ -99,31 +93,36 @@ export function renderHome() {
   const amt = money(Math.abs(big));
   const [cur, num] = [amt.match(/^[^\d]+/)?.[0] || "", amt.replace(/^[^\d]+/, "")];
   const waiting = live(st.wish).filter((w) => w.status === "waiting");
-  const endTxt = c.daysLeft === 1 ? "today is the last day before money comes in" : `${money(c.dailyBase)}/day through ${pretty(c.end)}`;
+  const pct = c.status === "over" || c.status === "short" ? 100 : Math.round(Math.max(0, Math.min(1, frac)) * 100);
+  const daysTxt = c.daysLeft === 1 ? "Last day before money comes in" : `${c.daysLeft} days to payday`;
+  const line =
+    c.status === "short" ? `Bills before ${pretty(addDays(c.end, 1))} need more than you have.`
+    : c.status === "over" ? `Every day until ${pretty(c.end)} drops to ${money(c.tomorrowDaily ?? 0)}.`
+    : c.daysLeft === 1 ? `That's everything until money comes in tomorrow.`
+    : `${money(c.dailyBase)} a day through ${pretty(c.end)}.`;
   return `
   <header class="top">
     <div><h1>${greeting()}</h1><div class="sub">${pretty(t, { full: true })}</div></div>
     <div class="row" style="gap:8px"><a class="icon-btn" href="#/automate" aria-label="Automations and widgets">${icon("bolt")}</a><a class="icon-btn" href="#/settings" aria-label="Settings">${icon("gear")}</a></div>
   </header>
   <section class="hero ${c.status}" aria-live="polite">
-    ${c.status !== "short" ? ring(frac) : ""}
-    <div class="label">${c.status === "short" ? "Short until payday" : c.status === "over" ? "Over today's limit" : "Safe to spend today"}</div>
+    <div class="hero-top"><span class="label">${c.status === "short" ? "Short before payday" : c.status === "over" ? "Over today's limit" : "Safe to spend today"}</span><span class="days">${daysTxt}</span></div>
     <div class="big num">${big < 0 ? "−" : ""}<small>${esc(cur.replace("−", ""))}</small>${esc(num)}</div>
-    <div class="line">${c.status === "short" ? `Bills before ${pretty(addDays(c.end, 1))} need more than you have` : c.status === "over" ? `Tomorrow: ${money(c.tomorrowDaily ?? 0)}/day` : endTxt}</div>
-    <div class="chips">
-      ${c.status === "short" ? "" : `<span class="chip">💵 ${money(Math.max(c.pool, 0), { cents: false })} until ${c.daysLeft > 1 ? pretty(addDays(c.end, 1)).replace(/^\w+, /, "") : "tomorrow"}</span>`}
-      ${c.upcomingTotal > 0 ? `<span class="chip">🧾 ${money(c.upcomingTotal, { cents: false })} bills set aside</span>` : ""}
-      ${streak >= 1 ? `<span class="chip">🔥 ${plural(streak, "no-spend day")}</span>` : ""}
+    <div class="gauge" role="img" aria-label="${c.status === "over" || c.status === "short" ? "Over the limit" : `${pct}% of today's money left`}"><i style="width:${pct}%"></i></div>
+    <div class="line">${line}</div>
+    <div class="facts">
+      ${c.status === "short" ? "" : `<span><b class="num">${money(Math.max(c.pool, 0), { cents: false })}</b> left until ${c.daysLeft > 1 ? pretty(addDays(c.end, 1)).replace(/^\w+, /, "") : "tomorrow"}</span>`}
+      ${c.upcomingTotal > 0 ? `<span><b class="num">${money(c.upcomingTotal, { cents: false })}</b> in bills set aside</span>` : ""}
     </div>
   </section>
   <div class="actions">
-    <button class="btn" data-act="afford">🤔 Can I afford it?</button>
-    <button class="btn primary" data-act="add">＋ Log spending</button>
+    <button class="btn" data-act="afford">Can I afford it?</button>
+    <button class="btn primary" data-act="add">Log spending</button>
   </div>
   <div class="stats">
     <a class="stat" href="#/activity"><b class="num">${money(c.spentToday)}</b><span>spent today</span></a>
-    <a class="stat" href="#/wait"><b class="num">${waiting.length ? waiting.length : money(res.total, { cents: false })}</b><span>${waiting.length ? "on waitlist" : "not spent (skipped)"}</span></a>
-    <a class="stat" href="#/insights"><b class="num">${streak}</b><span>day streak 🔥</span></a>
+    <a class="stat" href="#/wait"><b class="num">${waiting.length ? waiting.length : money(res.total, { cents: false })}</b><span>${waiting.length ? "on your waitlist" : "not spent by skipping"}</span></a>
+    <a class="stat" href="#/insights"><b class="num">${plural(streak, "day")}</b><span>no-spend streak</span></a>
   </div>
   ${nudges(c)}
   <div class="section-title"><span>Today</span><a href="#/activity">All activity</a></div>
@@ -164,7 +163,7 @@ export function openReview() {
     const cats = s().cats.filter((c) => !c.deleted && c.id !== "bills");
     return `<h3>Check purchases <span class="tag">${items.length} left</span><button data-close>Done</button></h3>
       <div class="card" style="text-align:center"><div class="amount-display num" style="font-size:44px">${money(tx.amount)}</div>
-      <div style="font-weight:650">${esc(tx.note || "Unknown merchant")}</div><div class="small muted">${pretty(tx.date)}${tx.card ? ` · ${esc(tx.card)}` : ""}</div></div>
+      <div style="font-weight:650">${esc(tx.note || "Unknown merchant")}</div><div class="small muted">${pretty(tx.date)}${tx.card ? `, ${esc(tx.card)}` : ""}</div></div>
       <div class="small muted" style="margin:0 4px 8px">Category</div>
       <div class="chips" style="margin-bottom:14px">${cats.map((c) => `<button class="chip-btn ${tx.cat === c.id ? "on" : ""}" data-cat="${c.id}">${c.emoji} ${esc(c.name)}</button>`).join("")}</div>
       <div class="small muted" style="margin:0 4px 8px">Why? (optional)</div>

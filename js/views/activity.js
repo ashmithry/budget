@@ -62,7 +62,7 @@ export function renderActivity() {
   const prevMonth = addDays(mStart, -1);
   const nextMonth = addDays(mEnd, 1);
   return `
-  <header class="top"><div><h1>Activity</h1><div class="sub">${money(monthSpent)} out · ${money(monthIn)} in · ${monthName(month)}</div></div>
+  <header class="top"><div><h1>Activity</h1><div class="sub">${money(monthSpent)} out and ${money(monthIn)} in during ${monthName(month)}</div></div>
     <button class="icon-btn" data-act="income" aria-label="Add money in">💰</button></header>
   <div class="card">
     <div class="row between" style="margin-bottom:10px">

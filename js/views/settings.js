@@ -223,7 +223,7 @@ function scriptText(token) {
 const API = "${ORIGIN}/api/widget?t=${token}";
 let d;
 try { d = await new Request(API).loadJSON(); } catch (e) { d = { ok: false, text: "Offline" }; }
-const COLORS = { good: ["#0f9a63", "#0b6e4a"], tight: ["#d98a07", "#a45f00"], over: ["#e5484d", "#a8262b"], short: ["#e5484d", "#a8262b"], stale: ["#4a4d57", "#2c2e35"] };
+const COLORS = { good: ["#2E6A47", "#1F4A32"], tight: ["#A0660F", "#7A4C08"], over: ["#B3312A", "#86221D"], short: ["#B3312A", "#86221D"], stale: ["#3F4A43", "#28302B"] };
 const cur = d.cur || "$";
 const fmt = (n) => (n < 0 ? "-" : "") + cur + (Math.abs(n) >= 100 ? Math.round(Math.abs(n)).toString() : Math.abs(n).toFixed(2).replace(/\\.00$/, ""));
 const w = new ListWidget();
@@ -238,7 +238,7 @@ if (fam === "accessoryInline") {
 } else if (fam === "accessoryRectangular") {
   const h = w.addText(d.ok ? (d.left >= 0 ? "SAFE TODAY" : "OVER TODAY") : "BUDGET"); h.font = Font.boldSystemFont(11);
   const a = w.addText(d.ok ? fmt(Math.abs(d.left)) : "Open app"); a.font = Font.boldRoundedSystemFont(22);
-  if (d.ok) { const c = w.addText(fmt(d.daily) + "/day · " + d.daysLeft + "d left"); c.font = Font.systemFont(11); }
+  if (d.ok) { const c = w.addText(fmt(d.daily) + "/day, " + d.daysLeft + "d left"); c.font = Font.systemFont(11); }
 } else {
   const g = new LinearGradient(); const c = COLORS[d.status] || COLORS.stale;
   g.colors = [new Color(c[0]), new Color(c[1])]; g.locations = [0, 1]; w.backgroundGradient = g;
@@ -247,7 +247,7 @@ if (fam === "accessoryInline") {
   w.addSpacer(4);
   const a = w.addText(d.ok ? fmt(Math.abs(d.left)) : "Open app"); a.font = Font.heavyRoundedSystemFont(fam === "small" ? 34 : 40); a.textColor = Color.white(); a.minimumScaleFactor = 0.5; a.lineLimit = 1;
   w.addSpacer();
-  const t = w.addText(d.ok ? (d.status === "over" && d.tomorrow != null ? "Tomorrow " + fmt(d.tomorrow) + "/day" : fmt(d.daily) + "/day · " + d.daysLeft + " days left") : d.text || ""); t.font = Font.mediumSystemFont(12); t.textColor = new Color("#ffffff", 0.9); t.minimumScaleFactor = 0.7;
+  const t = w.addText(d.ok ? (d.status === "over" && d.tomorrow != null ? "Tomorrow " + fmt(d.tomorrow) + "/day" : fmt(d.daily) + "/day, " + d.daysLeft + " days left") : d.text || ""); t.font = Font.mediumSystemFont(12); t.textColor = new Color("#ffffff", 0.9); t.minimumScaleFactor = 0.7;
   if (d.ok && d.streak > 0 && fam !== "small") { const s = w.addText("🔥 " + d.streak + " no-spend days"); s.font = Font.systemFont(11); s.textColor = new Color("#ffffff", 0.85); }
 }
 Script.setWidget(w);

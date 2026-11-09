@@ -33,7 +33,7 @@ function budgets() {
     <div class="row between" style="border-top:1px solid var(--line);margin-top:8px;padding-top:8px"><b>${left >= 0 ? "Unplanned" : "Over-planned"}</b><b class="num ${left >= 0 ? "good" : "over"}">${money(left, { cents: false })}</b></div>
     <p class="tiny faint" style="margin:6px 0 0">${left < 0 ? "Your budgets add up to more than you earn. Trim a category or two." : "Unplanned money still counts toward your daily number. It's your cushion."}</p></div>` : ""}
   <div class="list">${rows.map((c) => `<button class="budget-row" data-act="cat" data-id="${c.id}">
-    <div class="row between"><span>${c.emoji} ${esc(c.name)}</span><span class="num small ${c.state === "over" ? "over" : c.state === "ahead" ? "tight" : "muted"}">${money(c.spent, { cents: false })}${c.limit ? ` / ${money(c.limit, { cents: false })}` : " · no limit"}</span></div>
+    <div class="row between"><span>${c.emoji} ${esc(c.name)}</span><span class="num small ${c.state === "over" ? "over" : c.state === "ahead" ? "tight" : "muted"}">${money(c.spent, { cents: false })}${c.limit ? ` / ${money(c.limit, { cents: false })}` : ", no limit"}</span></div>
     ${c.limit ? `<div class="bar"><i class="${c.state}" style="width:${Math.min(100, c.pct * 100)}%"></i><b style="left:${Math.min(100, (c.pace / c.limit) * 100)}%"></b></div>` : ""}
   </button>`).join("")}</div>
   <button class="btn block ghost" data-act="cat-new">＋ New category</button>
@@ -68,7 +68,7 @@ function bills() {
   <div class="card"><div class="row between"><div><div class="small muted">Every month</div><b class="num" style="font-size:24px">${money(recurringMonthly(st), { cents: false })}</b></div>
   ${subs.length ? `<div style="text-align:right"><div class="small muted">Subscriptions per year</div><b class="num tight" style="font-size:24px">${money(subsYear, { cents: false })}</b>${wage ? `<div class="tiny faint">${hoursText(subsYear / wage)}</div>` : ""}</div>` : ""}</div>
   <p class="tiny faint" style="margin:8px 0 0">Bills log themselves on their due date and are set aside ahead of time, so they never eat today's number.</p></div>
-  ${list.length ? `<div class="list">${list.map((b) => `<button class="item" data-act="bill" data-id="${b.id}"><div class="ic">${b.kind === "trial" ? "⏳" : b.kind === "sub" ? "📺" : "🏠"}</div><div class="main"><div class="name">${esc(b.name)}${b.paused ? `<span class="tag">paused</span>` : ""}${b.kind === "trial" ? `<span class="tag warn">trial</span>` : ""}</div><div class="meta">${b.kind === "trial" ? "Starts charging" : "Next"} ${pretty(b.next).toLowerCase()} · ${FREQS[b.freq].toLowerCase()}</div></div><div class="amt num">${money(b.amount)}</div></button>`).join("")}</div>` : `<div class="card empty"><div class="em">🧾</div>No bills yet. Add rent, your phone, and every subscription. Seeing them all together is half the battle.</div>`}
+  ${list.length ? `<div class="list">${list.map((b) => `<button class="item" data-act="bill" data-id="${b.id}"><div class="ic">${b.kind === "trial" ? "⏳" : b.kind === "sub" ? "📺" : "🏠"}</div><div class="main"><div class="name">${esc(b.name)}${b.paused ? `<span class="tag">paused</span>` : ""}${b.kind === "trial" ? `<span class="tag warn">trial</span>` : ""}</div><div class="meta">${b.kind === "trial" ? "Starts charging" : "Next"} ${pretty(b.next).toLowerCase()}, ${FREQS[b.freq].toLowerCase()}</div></div><div class="amt num">${money(b.amount)}</div></button>`).join("")}</div>` : `<div class="card empty"><div class="em">🧾</div>No bills yet. Add rent, your phone, and every subscription. Seeing them all together is half the battle.</div>`}
   <div class="small muted" style="margin:14px 4px 8px">Quick add</div>
   <div class="chips">${QUICK_BILLS.map(([n, k, f]) => `<button class="chip-btn" data-act="bill-new" data-name="${n === "Free trial" ? "" : n}" data-kind="${k}" data-freq="${f}">＋ ${n}</button>`).join("")}</div>
   ${subs.length >= 2 ? `<button class="btn block ghost" style="margin-top:14px" data-act="sub-audit">✂️ Subscription check-up</button>` : ""}`;
@@ -123,7 +123,7 @@ function income() {
   const list = live(st.income).filter((x) => !x.done).sort((a, b) => (a.next < b.next ? -1 : 1));
   const funds = live(st.goals).filter((g) => g.type === "stretch");
   return `
-  ${list.length ? `<div class="list">${list.map((i) => `<button class="item" data-act="inc" data-id="${i.id}"><div class="ic">💰</div><div class="main"><div class="name">${esc(i.name)}</div><div class="meta">Next ${pretty(i.next).toLowerCase()} · ${FREQS[i.freq].toLowerCase()}</div></div><div class="amt num pos">${money(i.amount)}</div></button>`).join("")}</div>` : `<div class="card empty"><div class="em">💰</div>Add each way money comes in: a job, allowance, Venmo from family. Your daily number is spread out until the next one.</div>`}
+  ${list.length ? `<div class="list">${list.map((i) => `<button class="item" data-act="inc" data-id="${i.id}"><div class="ic">💰</div><div class="main"><div class="name">${esc(i.name)}</div><div class="meta">Next ${pretty(i.next).toLowerCase()}, ${FREQS[i.freq].toLowerCase()}</div></div><div class="amt num pos">${money(i.amount)}</div></button>`).join("")}</div>` : `<div class="card empty"><div class="em">💰</div>Add each way money comes in: a job, allowance, Venmo from family. Your daily number is spread out until the next one.</div>`}
   <button class="btn block primary" data-act="inc-new">＋ Regular income</button>
   <div class="section-title"><span>Lump sums</span></div>
   <div class="card"><div class="nudge"><div class="em">🪣</div><div class="grow"><div class="t">Got a big amount at once?</div><div class="d">Financial aid refunds, scholarships, summer job savings, birthday money. Lump sums are easy to blow early. Turn it into a weekly paycheck to yourself that lasts until the date you choose.</div><div class="btns"><button class="btn sm primary" data-act="stretch-new">Stretch a lump sum</button></div></div></div></div>
@@ -131,7 +131,7 @@ function income() {
 }
 function fundRow(g) {
   const left = goalSaved(s(), g.id);
-  return `<button class="item" data-act="goal" data-id="${g.id}"><div class="ic">🪣</div><div class="main"><div class="name">${esc(g.name)}</div><div class="meta">${left > 0 ? `${money(g.perRelease)}/week · next ${g.next ? pretty(g.next).toLowerCase() : "-"}${g.until ? ` · lasts to ${pretty(g.until, { full: true })}` : ""}` : "All released"}</div></div><div class="amt num">${money(left)}<span class="sub">left</span></div></button>`;
+  return `<button class="item" data-act="goal" data-id="${g.id}"><div class="ic">🪣</div><div class="main"><div class="name">${esc(g.name)}</div><div class="meta">${left > 0 ? `${money(g.perRelease)}/week, next ${g.next ? pretty(g.next).toLowerCase() : "-"}${g.until ? `, lasts to ${pretty(g.until, { full: true })}` : ""}` : "All released"}</div></div><div class="amt num">${money(left)}<span class="sub">left</span></div></button>`;
 }
 function editIncome(id) {
   const i = id ? live(s().income).find((x) => x.id === id) : null;
@@ -197,7 +197,7 @@ function goals() {
     return `<button class="card" style="display:block;width:100%;text-align:left" data-act="goal" data-id="${g.id}">
       <div class="row between"><b>${g.emoji || "🎯"} ${esc(g.name)}</b><span class="num">${money(saved, { cents: false })}${tgt ? ` / ${money(tgt, { cents: false })}` : ""}</span></div>
       ${tgt ? `<div class="bar"><i style="width:${pct * 100}%"></i></div>` : ""}
-      <div class="small muted" style="margin-top:8px">${pct >= 1 ? "🎉 Goal reached!" : g.perPay ? `Auto-saves ${money(g.perPay)} each payday${months ? ` · done in about ${plural(months, "month")}` : ""}` : "No auto-save yet. Tap to set one."}${g.due ? ` · by ${pretty(g.due, { full: true })}` : ""}</div></button>`;
+      <div class="small muted" style="margin-top:8px">${pct >= 1 ? "🎉 Goal reached!" : g.perPay ? `Auto-saves ${money(g.perPay)} each payday${months ? `, done in about ${plural(months, "month")}` : ""}` : "No auto-save yet. Tap to set one."}${g.due ? `, by ${pretty(g.due, { full: true })}` : ""}</div></button>`;
   }).join("") : `<div class="card empty"><div class="em">🎯</div>Saving works best when it happens before you can spend it. Add a goal and an amount to set aside each payday.</div>`}
   <button class="btn block primary" data-act="goal-new">＋ New goal</button>
   <p class="tiny faint" style="margin:10px 6px">Ideas: emergency fund ($500 covers most student surprises), spring break, a new laptop, next semester's books.</p>`;
@@ -302,9 +302,9 @@ export function renderWait() {
   };
   return `<header class="top"><div><h1>Waitlist</h1><div class="sub">Want it? Wait first. Most urges pass.</div></div><a class="icon-btn" href="#/plan" aria-label="Back to plan">‹</a></header>
   <div class="card ok"><div class="row between"><div><div class="small muted">Not spent by skipping</div><b class="num" style="font-size:28px">${money(r.total)}</b></div><div style="text-align:right" class="small muted">${plural(r.n, "thing")} skipped${wage ? `<br>${hoursText(r.total / wage)} saved` : ""}</div></div></div>
-  ${waiting.length ? `<div class="list">${waiting.map((w) => `<button class="item" data-act="wish" data-id="${w.id}"><div class="ic">⏳</div><div class="main"><div class="name">${esc(w.name)}</div><div class="meta ${w.unlockAt <= Date.now() ? "good" : ""}">${left(w)}${wage ? ` · ${hoursText(w.price / wage)}` : ""}</div></div><div class="amt num">${money(w.price)}</div></button>`).join("")}</div>` : `<div class="card empty"><div class="em">🛍️</div>Nothing waiting. Next time you want something, tap <b>Can I afford it?</b> and choose "Wait".</div>`}
+  ${waiting.length ? `<div class="list">${waiting.map((w) => `<button class="item" data-act="wish" data-id="${w.id}"><div class="ic">⏳</div><div class="main"><div class="name">${esc(w.name)}</div><div class="meta ${w.unlockAt <= Date.now() ? "good" : ""}">${left(w)}${wage ? `, ${hoursText(w.price / wage)}` : ""}</div></div><div class="amt num">${money(w.price)}</div></button>`).join("")}</div>` : `<div class="card empty"><div class="em">🛍️</div>Nothing waiting. Next time you want something, tap <b>Can I afford it?</b> and choose "Wait".</div>`}
   <button class="btn block primary" data-act="wish-new">＋ Add something I want</button>
-  ${done.length ? `<div class="section-title"><span>Decided</span></div><div class="list">${done.map((w) => `<div class="item"><div class="ic">${w.status === "skipped" ? "💪" : "🛍️"}</div><div class="main"><div class="name">${esc(w.name)}</div><div class="meta">${w.status === "skipped" ? "Skipped" : "Bought"}${w.decidedDay ? ` · ${pretty(w.decidedDay).toLowerCase()}` : ""}</div></div><div class="amt num ${w.status === "skipped" ? "pos" : ""}">${money(w.price)}</div></div>`).join("")}</div>` : ""}`;
+  ${done.length ? `<div class="section-title"><span>Decided</span></div><div class="list">${done.map((w) => `<div class="item"><div class="ic">${w.status === "skipped" ? "💪" : "🛍️"}</div><div class="main"><div class="name">${esc(w.name)}</div><div class="meta">${w.status === "skipped" ? "Skipped" : "Bought"}${w.decidedDay ? `, ${pretty(w.decidedDay).toLowerCase()}` : ""}</div></div><div class="amt num ${w.status === "skipped" ? "pos" : ""}">${money(w.price)}</div></div>`).join("")}</div>` : ""}`;
 }
 
 export const planActions = {

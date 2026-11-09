@@ -86,10 +86,10 @@ export function openAdd(prefill = {}) {
     if (!a || st.kind !== "expense" || st.refund) { el.innerHTML = ""; return; }
     const c = compute(s());
     const wage = Number(s().settings.wage) || 0;
-    const hrs = wage ? ` · ${hoursText(a / wage)}` : "";
+    const hrs = wage ? `, ${hoursText(a / wage)}` : "";
     const base = editing && editing.date === today() ? c.leftToday + Number(editing.amount) : c.leftToday;
     const after = round2(base - a);
-    if (st.date !== today()) el.innerHTML = `<span class="muted">${hrs.slice(3)}</span>`;
+    if (st.date !== today()) el.innerHTML = `<span class="muted">${hrs.slice(2).replace(/^./, (m) => m.toUpperCase())}</span>`;
     else if (after >= 0) el.innerHTML = `<span class="good">Leaves ${money(after)} for today</span><span class="muted">${hrs}</span>`;
     else {
       const tmr = c.daysLeft > 1 ? round2(Math.max(0, c.pool - a + (editing ? Number(editing.amount) : 0)) / (c.daysLeft - 1)) : null;
@@ -182,7 +182,7 @@ export function openAdd(prefill = {}) {
     sh.close();
     if (!editing && st.kind === "expense" && !st.refund) {
       const after = compute(s());
-      const msg = after.leftToday >= 0 ? `Logged · ${money(after.leftToday)} left today` : `Logged · ${money(-after.leftToday)} over today`;
+      const msg = after.leftToday >= 0 ? `Logged. ${money(after.leftToday)} left today` : `Logged. ${money(-after.leftToday)} over today`;
       toast(msg, { label: "Undo", run: () => remove("tx", tx.id) });
       prefill.onDone?.(tx, before, after);
     } else toast(editing ? "Saved" : "Logged");
@@ -218,7 +218,7 @@ export function openAfford(prefill = {}) {
     if (r.goal && r.goal.pct >= 2) lines.push([r.goal.emoji || "🎯", `Same as <b>${r.goal.pct}%</b> of your ${esc(r.goal.name)} goal`]);
     if (r.poolAfter < 0 && r.pool >= 0) lines.push(["🚫", `You'd be <b>${money(-r.poolAfter)}</b> short for bills before payday`]);
     const cool = Number(s().settings.coolHours) || 48;
-    return `<h3>${st.name ? esc(st.name) : "This purchase"} · ${money(r.price)}<button data-close>Close</button></h3>
+    return `<h3>${st.name ? esc(st.name) : "This purchase"}, ${money(r.price)}<button data-close>Close</button></h3>
       <div class="verdict ${r.verdict}"><div class="head">${head}</div><ul>${lines.map(([e, t]) => `<li><span>${e}</span><span>${t}</span></li>`).join("")}</ul></div>
       ${rules.length ? `<div class="card warn"><div class="small" style="font-weight:700;margin-bottom:4px">Your rules</div>${rules.map((x) => `<div>“${esc(x.text)}”</div>`).join("")}</div>` : ""}
       <div class="stack">
@@ -254,7 +254,7 @@ export function openAfford(prefill = {}) {
         sh.close();
         put("tx", { id: uid(), kind: "expense", amount: price, note: st.name, cat: st.cat || guessCategory(s(), st.name) || "other", date: today(), ts: Date.now(), source: "manual", mood: "treat" });
         const c = compute(s());
-        toast(c.leftToday >= 0 ? `Logged · ${money(c.leftToday)} left today` : `Logged · ${money(-c.leftToday)} over today`);
+        toast(c.leftToday >= 0 ? `Logged. ${money(c.leftToday)} left today` : `Logged. ${money(-c.leftToday)} over today`);
       };
     }
   };

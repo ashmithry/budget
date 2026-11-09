@@ -28,7 +28,7 @@ function dots() {
 export function renderOnboard() {
   const st = o.step;
   if (st === 0) return `<div class="onb">
-    <div style="margin-top:12vh"><div class="big-emoji">💸</div>
+    <div class="welcome">
     <h1>Know exactly what's safe to spend. Every day.</h1>
     <p class="lead">One number that already accounts for your bills, savings and next payday. Plus a pause button for impulse buys, and automatic logging so you barely have to type.</p></div>
     <div class="foot"><button class="btn primary block" data-ob="next">Get started</button><button class="btn ghost block" data-ob="link">I already use this on another device</button></div></div>`;
@@ -74,7 +74,7 @@ export function renderOnboard() {
     <div class="foot"><button class="btn primary block" data-ob="finish">Finish</button><button class="btn ghost block" data-ob="back">Back</button></div></div>`;
   const c = compute(s());
   return `<div class="onb">${dots()}
-    <div style="margin-top:6vh"><div class="big-emoji">✨</div>
+    <div class="welcome" style="margin-top:6vh">
     <h1>You can safely spend <span class="good">${money(Math.max(0, c.leftToday))}</span> today.</h1>
     <p class="lead">That's ${money(c.dailyBase)} a day until ${c.daysLeft > 1 ? "your next money day" : "tomorrow"}${c.upcomingTotal ? `, after setting aside ${money(c.upcomingTotal)} for bills` : ""}. Spend less today and tomorrow's number goes up. Go over and it goes down.</p>
     <div class="card accent"><div class="nudge"><div class="em">🤖</div><div><div class="t">One more thing</div><div class="d">Turn on sync to log Apple Pay taps automatically and put this number on your home and lock screen.</div></div></div></div></div>
