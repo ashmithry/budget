@@ -1,9 +1,66 @@
-import { get } from "../store.js";
+import { get, commit } from "../store.js";
+import { ai, AIError } from "../ai.js";
 import { today, addDays, diffDays, monthStart, dayOfMonth, dowName } from "../dates.js";
 import { live, categoryMonth, leaks, moodStats, regretStats, weekdayStats, lateNight, resisted, noSpendStreak, underStreak, weekReview, txIn, isFlex, catById, MOODS, round2, recurringMonthly } from "../engine.js";
-import { esc, money, plural, hoursText, ic, catTile, emptyState } from "../ui.js";
+import { esc, money, plural, hoursText, ic, catTile, emptyState, toast, nudge } from "../ui.js";
 
 const s = () => get();
+
+// The numbers Claude sees for the weekly check-in: totals for the last 7 days, nothing else.
+function weekFacts(st) {
+  const w = weekReview(st);
+  const byCategory = {};
+  const byWhy = {};
+  for (const tx of txIn(st, w.start, w.end, isFlex)) {
+    const c = catById(st, tx.cat).name;
+    byCategory[c] = round2((byCategory[c] || 0) + Number(tx.amount));
+    if (tx.mood) {
+      const m = MOODS.find((x) => x.id === tx.mood)?.label || tx.mood;
+      byWhy[m] = round2((byWhy[m] || 0) + Number(tx.amount));
+    }
+  }
+  return {
+    currency: st.settings.currency || "$",
+    week: `${w.start} to ${w.end}`,
+    spent: w.spent,
+    dailyLimitsAddedUp: w.allowance,
+    daysUnderDailyLimit: w.tracked ? `${w.under} of ${w.tracked}` : "not tracked yet",
+    noSpendDays: w.noSpend,
+    previousWeekSpent: w.prevSpent,
+    byCategory,
+    byWhy,
+    frequentRepeatPurchases30Days: leaks(st).slice(0, 3).map((l) => ({ name: l.label, times: l.n, total: l.total })),
+    skippedPurchasesTotal: resisted(st, w.start).total,
+    lateNightPurchases30Days: lateNight(st).n,
+  };
+}
+
+function checkinCard(st) {
+  if (!st.meta.key) return "";
+  const wk = weekReview(st).end;
+  const c = st.meta.checkin;
+  if (c && c.wk === wk) return `<div class="section-title"><span>Weekly check-in</span><span class="tiny faint">from Claude</span></div>
+    <div class="card checkin"><div class="t">${esc(c.headline)}</div><p>${esc(c.body)}</p><div class="try">${ic("signpost", { size: 18 })}<div><b>Try this week:</b> ${esc(c.tryThis)}</div></div></div>`;
+  return nudge("info", "chart-line", "Weekly check-in from Claude", "A short read on what drove the last 7 days of spending, and one thing to try. Only your weekly totals are sent.", `<button class="btn sm primary" data-act="checkin">Get my check-in</button>`);
+}
+
+export const insightsActions = {
+  checkin: async (el) => {
+    el.disabled = true;
+    el.textContent = "Reading your week…";
+    try {
+      const st = get();
+      const r = await ai("checkin", { week: weekFacts(st) });
+      if (!r.ok) throw new AIError("Not enough spending this week for a check-in yet.");
+      st.meta.checkin = { wk: weekReview(st).end, ...r.checkin };
+      commit({ sync: false });
+    } catch (e) {
+      el.disabled = false;
+      el.textContent = "Get my check-in";
+      toast(e instanceof AIError ? e.message : "Claude couldn't do that right now. Try again.");
+    }
+  },
+};
 
 export function renderInsights() {
   const st = s();
@@ -48,6 +105,7 @@ export function renderInsights() {
     <div class="stat"><b class="num">${plural(noSpendStreak(st), "day")}</b><span>no-spend streak</span><span class="tiny faint" style="display:block">${plural(underStreak(st), "day")} under limit</span></div>
     <div class="stat"><b class="num good">${money(res.total, { cents: false })}</b><span>not spent by skipping</span></div>
   </div>
+  ${hasData ? checkinCard(st) : ""}
   ${tips.length ? `<div class="section-title"><span>Suggestions</span></div><div class="card tips">${tips.map(([n, x]) => `<div class="tip">${ic(n, { size: 18 })}<div>${x}</div></div>`).join("")}</div>` : ""}
   ${wk.tracked || wk.spent ? `<div class="section-title"><span>Last 7 days</span></div><div class="card">
     <div class="row between"><span>Spent</span><b class="num">${money(wk.spent)}</b></div>

@@ -3,6 +3,7 @@ import { get, put, remove, commit, setSettings } from "./store.js";
 import { today, addDays, pretty } from "./dates.js";
 import { compute, impact, categories, catById, guessCategory, goalSaved, MOODS, live, round2, normMerchant, uid } from "./engine.js";
 import { sheet, esc, money, hoursText, toast, haptic, confirmSheet, ic, chip, catLook, topSheet } from "./ui.js";
+import { ai, AIError } from "./ai.js";
 
 const s = () => get();
 
@@ -64,6 +65,7 @@ export function openAdd(prefill = {}) {
         <button data-kind="refund" class="${st.refund ? "on" : ""}">Refund</button>
         <button data-kind="income" class="${st.kind === "income" ? "on" : ""}">Got money</button>
       </div>
+      ${editing || !get().meta.key ? "" : `<div class="type-it"><input class="in" id="nl" placeholder="Or type it: 23 on pizza with friends" value="${esc(st.nl || "")}" autocomplete="off" enterkeyhint="go"><button type="button" class="btn sm primary" id="nlgo" aria-label="Fill in with Claude">${ic("pencil", { size: 16 })}Fill in</button></div>`}
       <div class="amount-display num" id="amt">${amountHTML(st.amt)}</div>
       <div class="amount-hint" id="hint"></div>
       <label class="f"><input class="in" id="note" list="merchants" placeholder="${st.kind === "income" ? "From? (job, parents, Venmo…)" : "Where? (Chipotle, Target…)"}" value="${esc(st.note)}" autocomplete="off" enterkeyhint="done">
@@ -132,6 +134,30 @@ export function openAdd(prefill = {}) {
       el.querySelectorAll("[data-mood]").forEach((x) => x.classList.toggle("on", x.dataset.mood === st.mood));
     }));
     el.querySelector("#date").onchange = (e) => { st.date = e.target.value || today(); hint(); };
+    const nl = el.querySelector("#nl");
+    const nlgo = el.querySelector("#nlgo");
+    if (nl && nlgo) {
+      nl.oninput = () => (st.nl = nl.value);
+      nl.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); nlgo.click(); } };
+      nlgo.onclick = async () => {
+        const text = nl.value.trim();
+        if (!text) return toast("Type what you spent, like: 12 at Chipotle");
+        nlgo.disabled = true;
+        nlgo.lastChild.textContent = "Reading…";
+        try {
+          const r = await ai("parse", { text, today: today() });
+          if (!r.ok || !r.entry) throw new AIError("Couldn't find an amount in that. Try: 12 at Chipotle");
+          const e = r.entry;
+          Object.assign(st, { kind: e.kind === "income" ? "income" : "expense", refund: e.kind === "refund", amt: String(e.amount), note: e.merchant, cat: e.cat, catTouched: true, mood: e.mood || null, date: e.date || today(), nl: "" });
+          sh.render();
+          toast("Filled in. Check it, then tap Log it.");
+        } catch (err) {
+          nlgo.disabled = false;
+          nlgo.lastChild.textContent = "Fill in";
+          toast(err instanceof AIError ? err.message : "Claude couldn't read that. Try again.");
+        }
+      };
+    }
     el.querySelector("#save").onclick = save;
     el.querySelector("#del")?.addEventListener("click", async () => {
       if (await confirmSheet("Delete this?", `${money(editing.amount)} ${editing.note || ""}`)) {

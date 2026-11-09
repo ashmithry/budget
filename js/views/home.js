@@ -22,6 +22,7 @@ function txRow(tx) {
     tx.source === "applepay" ? `<span class="tag brand">Apple Pay</span>` : tx.source === "shortcut" ? `<span class="tag brand">Shortcut</span>` : "",
     tx.source === "bill" ? `<span class="tag">auto</span>` : "",
     tx.review ? `<span class="tag warn">check</span>` : "",
+    tx.aiCat ? `<span class="tag">sorted by Claude</span>` : "",
     tx.worth === "no" ? `<span class="tag bad">regret</span>` : "",
   ].join("");
   const name = tx.note || (tx.kind === "expense" ? c.name : tx.kind === "income" ? "Money in" : tx.kind === "save" ? "Saved" : "Adjustment");

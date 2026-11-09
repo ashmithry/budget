@@ -1,20 +1,22 @@
 // Boot, routing, and the loops that keep things automatic (bills, paydays, sync, badge).
-import { get, subscribe, runAutomation, commit } from "./store.js";
+import { get, subscribe, runAutomation, commit, put } from "./store.js";
 import { today } from "./dates.js";
 import { $, icon, toast, money, closeAllSheets, inl, nudge, plural } from "./ui.js";
 import { openAdd, openAfford } from "./sheets.js";
 import { sync, pushSoon } from "./sync.js";
+import { ai } from "./ai.js";
+import { live } from "./engine.js";
 import { updateBadge } from "./badge.js";
 import { renderHome, homeActions } from "./views/home.js";
 import { renderActivity, activityActions, bindActivity } from "./views/activity.js";
 import { renderPlan, renderWait, planActions } from "./views/plan.js";
-import { renderInsights } from "./views/insights.js";
+import { renderInsights, insightsActions } from "./views/insights.js";
 import { renderSettings, bindSettings, renderAutomate, bindAutomate, settingsActions, automateActions, applyTheme } from "./views/settings.js";
 import { renderOnboard, onboardActions, onboardBefore, onboardShowingDone } from "./views/onboard.js";
 
 const root = $("#app");
 const tabsEl = $("#tabs");
-const ACTIONS = { ...homeActions, ...activityActions, ...planActions, ...settingsActions, ...automateActions };
+const ACTIONS = { ...homeActions, ...activityActions, ...planActions, ...settingsActions, ...automateActions, ...insightsActions };
 
 function route() {
   const h = location.hash.replace(/^#\/?/, "");
@@ -116,6 +118,27 @@ subscribe((st, { sync: isUserChange } = {}) => {
   if (isUserChange && get().meta.key) pushSoon();
 });
 
+/* ---------- Claude sorts auto-logged purchases from stores the app doesn't know ---------- */
+let sorting = false;
+async function sortUnknownStores() {
+  if (sorting) return;
+  const todo = live(get().tx).filter((x) => x.review && x.kind === "expense" && x.cat === "other" && x.note && !x.aiTried);
+  if (!todo.length) return;
+  sorting = true;
+  try {
+    const { results = [] } = await ai("categorize", { merchants: [...new Set(todo.map((x) => x.note))] });
+    const byName = new Map(results.map((r) => [r.merchant, r.cat]));
+    for (const tx of todo) {
+      const cat = byName.get(tx.note);
+      put("tx", cat && cat !== "other" ? { id: tx.id, cat, review: false, aiCat: true, aiTried: true } : { id: tx.id, aiTried: true });
+    }
+  } catch {
+    // No key, no sync, offline or over the limit: they just stay in "Check these".
+  } finally {
+    sorting = false;
+  }
+}
+
 /* ---------- automation loop ---------- */
 let lastDay = today();
 function tick() {
@@ -135,6 +158,7 @@ async function doSync() {
     if (r?.added) toast(`${r.added} purchase${r.added > 1 ? "s" : ""} logged automatically`);
     runAutomation();
     scheduleRender();
+    sortUnknownStores();
   } catch (e) {
     console.warn("sync failed", e);
   }

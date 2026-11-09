@@ -29,6 +29,14 @@ Why each feature exists: see [RESEARCH.md](RESEARCH.md).
 - **App-icon badge** = today's dollars left (iOS 16.4+ Home Screen apps).
 - **Android**: long-press shortcuts (manifest), MacroDroid/Tasker → `/api/log`, KWGT → `/api/widget`.
 
+### Claude features (optional)
+Needs `ANTHROPIC_API_KEY` set on the `budget` Vercel project (Settings › Environment Variables, Production), plus sync turned on in the app.
+- **Sorts unknown Apple Pay stores:** after a sync, stores the app has never seen (e.g. "SQ *BLUE DOOR") are categorized by Claude and tagged "sorted by Claude". Only the store names are sent.
+- **Type it out:** in Log spending, type "23 on pizza with friends" and tap Fill in. Only that sentence (plus your category names) is sent.
+- **Weekly check-in** on Insights: a short read on what drove your week plus one thing to try, on demand. Only the week's totals are sent.
+
+Runs on `claude-opus-5-5` (`api/ai.js`) with structured JSON output and Anthropic's default refusal fallback. Each call needs a valid budget link token and is capped at 60 calls a day per budget (`budget_ai_ok`), so the public endpoint can't run up the bill.
+
 ## Privacy & architecture
 
 - Plain HTML/CSS/JS modules, no build step. Data lives on the device (`localStorage`). Works offline (service worker).
@@ -42,7 +50,8 @@ index.html, css/, js/          the app
   js/store.js                  local state + merge
   js/sync.js                   encryption + cloud sync
   js/views/*.js                screens
-api/log.js, api/widget.js      Vercel functions for Shortcuts / widgets (no dependencies)
+api/log.js, api/widget.js      Vercel functions for Shortcuts / widgets
+api/ai.js                      Claude features (needs ANTHROPIC_API_KEY)
 sql/budget.sql                 database functions
 tests/engine.test.mjs          node --test
 ```
