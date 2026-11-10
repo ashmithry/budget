@@ -6,7 +6,7 @@ import { esc, money, toast, plural, costFrame, ic, tile, catTile, catLook } from
 // Older data stored an emoji; anything without an icon gets a sensible one.
 const goalIcon = (g) => g.icon || (g.type === "stretch" ? "layers" : "target");
 import { formSheet, openAfford, skipItem, openAdd } from "../sheets.js";
-import { pauseMinutes, DEFAULT_PAUSE } from "../cooldown.js";
+import { pauseMinutes, DEFAULT_PAUSE, openCooldown } from "../cooldown.js";
 
 const s = () => get();
 const freqOptions = Object.entries(FREQS);
@@ -322,6 +322,7 @@ export function renderWait() {
   const left = (w) => {
     const ms = w.unlockAt - Date.now();
     if (ms <= 0) return "Ready to decide";
+    if (ms < 3600000) return `${Math.ceil(ms / 60000)} min to go`;
     const h = Math.ceil(ms / 3600000);
     return h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h to go` : `${h}h to go`;
   };
@@ -369,10 +370,11 @@ export const planActions = {
   wish: (el) => {
     const w = live(s().wish).find((x) => x.id === el.dataset.id);
     if (!w) return;
+    if (w.short) return openCooldown(w.id);
     if (w.unlockAt <= Date.now()) openAfford({ price: w.price, name: w.name, cat: w.cat, wishId: w.id });
     else formSheet({
       title: w.name,
-      note: `Still ${Math.ceil((w.unlockAt - Date.now()) / 3600000)} hours to wait. Changed your mind already? That's a win.`,
+      note: `Still ${plural(Math.ceil((w.unlockAt - Date.now()) / 3600000), "hour")} to wait. Changed your mind already? That's a win.`,
       fields: [],
       saveLabel: "Keep waiting",
       deleteLabel: "Skip it (counts as saved)",

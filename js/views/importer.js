@@ -8,7 +8,7 @@ import { sheet, esc, money, ic, toast, plural } from "../ui.js";
 import { ai, AIError } from "../ai.js";
 
 // Split long pastes into chunks Claude can read in one go, on line boundaries.
-function chunks(text, max = 7000) {
+function chunks(text, max = 3500) {
   const out = [];
   let cur = "";
   for (const line of text.split(/\r?\n/)) {
@@ -19,7 +19,35 @@ function chunks(text, max = 7000) {
   return out;
 }
 
-const keyOf = (x) => `${x.date}|${round2(Math.abs(Number(x.amount)))}|${String(x.merchant || x.note || "").toLowerCase().slice(0, 12)}`;
+// Bank text is noisy ("SQ *BOBA GUYS 0423" vs "Boba Guys"), so compare merchants loosely.
+const normMerchant = (s) => String(s || "").toLowerCase().replace(/^(sq|tst|sp|pp|py)\s*\*\s*/, "").replace(/[^a-z]/g, "");
+const dayNum = (d) => Math.round(Date.parse(d + "T12:00:00Z") / 864e5);
+// Signed amount as it would be stored: expenses positive, refunds negative, income its own kind.
+const asStored = (x) => ({ kind: x.kind === "income" ? "income" : "expense", amount: x.kind === "refund" ? -Math.abs(x.amount) : Math.abs(x.amount) });
+const sameMerchant = (a, b) => {
+  const x = normMerchant(a), y = normMerchant(b);
+  if (!x || !y) return true;
+  const n = Math.min(x.length, y.length, 8);
+  return x.includes(y.slice(0, n)) || y.includes(x.slice(0, n));
+};
+
+// Drop what's already in the app (logged by hand or by an earlier import) and repeats inside the paste.
+// Each existing transaction can only cancel out one imported line.
+function dedupe(found, existing) {
+  const pool = existing.map((t) => ({ kind: t.kind, amount: Number(t.amount), date: t.date, name: t.note || "", used: false }));
+  const fresh = [];
+  const seen = new Set();
+  for (const x of found) {
+    const s = asStored(x);
+    const k = `${x.date}|${s.kind}|${round2(s.amount)}|${normMerchant(x.merchant)}`;
+    if (seen.has(k)) continue;
+    const hit = pool.find((t) => !t.used && t.kind === s.kind && Math.abs(t.amount - s.amount) <= 0.01 && Math.abs(dayNum(t.date) - dayNum(x.date)) <= 2 && sameMerchant(t.name, x.merchant));
+    if (hit) { hit.used = true; continue; }
+    seen.add(k);
+    fresh.push(x);
+  }
+  return fresh;
+}
 
 export function openImport() {
   const st = { step: "paste", text: "", found: [], progress: "" };
@@ -53,27 +81,27 @@ export function openImport() {
       const parts = chunks(text);
       st.step = "reading";
       const found = [];
-      try {
-        for (let i = 0; i < parts.length; i++) {
-          st.progress = parts.length > 1 ? `Part ${i + 1} of ${parts.length}…` : "This takes a few seconds.";
-          sh.render();
+      let failed = 0;
+      let lastErr = null;
+      for (let i = 0; i < parts.length; i++) {
+        st.progress = parts.length > 1 ? `Part ${i + 1} of ${parts.length}…` : "This takes a few seconds.";
+        sh.render();
+        try {
           const r = await ai("import", { text: parts[i], today: today() });
           found.push(...(r.transactions || []));
+        } catch (e) {
+          failed++;
+          lastErr = e;
+          if (e instanceof AIError && /limit|key|connected/i.test(e.message)) break;
         }
-      } catch (e) {
+      }
+      if (!found.length) {
         st.step = "paste";
         sh.render();
-        return toast(e instanceof AIError ? e.message : "Claude couldn't read that. Try a smaller chunk.");
+        return toast(!failed ? "Didn't find any purchases in that text." : lastErr instanceof AIError ? lastErr.message : "Claude couldn't read that. Try a smaller chunk.");
       }
-      const have = new Set(live(get().tx).map(keyOf));
-      const fresh = [];
-      const seen = new Set();
-      for (const x of found) {
-        const k = keyOf(x);
-        if (have.has(k) || seen.has(k)) continue;
-        seen.add(k);
-        fresh.push(x);
-      }
+      if (failed) toast(`Couldn't read ${plural(failed, "part")} of the paste. Showing the rest.`);
+      const fresh = dedupe(found, live(get().tx));
       st.dupes = found.length - fresh.length;
       st.found = fresh.sort((a, b) => (a.date < b.date ? 1 : -1));
       st.step = "review";

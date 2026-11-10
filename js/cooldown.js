@@ -91,9 +91,23 @@ export function openCooldown(wishId) {
 
   // rotate the reality cards
   let idx = 0;
-  const slides = [...el.querySelectorAll(".cd-slide")];
-  const dots = [...el.querySelectorAll(".cd-dots i")];
-  const show = (i) => { idx = (i + slides.length) % slides.length; slides.forEach((s, j) => s.classList.toggle("on", j === idx)); dots.forEach((d, j) => d.classList.toggle("on", j === idx)); };
+  const show = (i) => {
+    const slides = [...el.querySelectorAll(".cd-slide")];
+    const dots = [...el.querySelectorAll(".cd-dots i")];
+    if (!slides.length) return;
+    idx = (i + slides.length) % slides.length;
+    slides.forEach((s, j) => s.classList.toggle("on", j === idx));
+    dots.forEach((d, j) => d.classList.toggle("on", j === idx));
+  };
+  // If Claude has nothing to say, take its card and its dot out of the rotation.
+  const dropClaude = () => {
+    const slide = el.querySelector("#cd-claude")?.closest(".cd-slide");
+    if (!slide) return;
+    const at = [...el.querySelectorAll(".cd-slide")].indexOf(slide);
+    slide.remove();
+    el.querySelectorAll(".cd-dots i")[at]?.remove();
+    show(idx > at ? idx - 1 : idx);
+  };
   const rotator = setInterval(() => show(idx + 1), 6500);
   el.querySelector("#cd-cards").onclick = () => show(idx + 1);
 
@@ -102,9 +116,9 @@ export function openCooldown(wishId) {
     .then((res) => {
       const box = el.querySelector("#cd-claude");
       if (box && res.ok && res.line) box.innerHTML = `<div class="cd-quote">“${esc(res.line)}”</div><div class="cd-sub">Claude, looking at your numbers</div>`;
-      else box?.closest(".cd-slide")?.remove();
+      else dropClaude();
     })
-    .catch(() => el.querySelector("#cd-claude")?.closest(".cd-slide")?.remove());
+    .catch(dropClaude);
 
   function close() {
     clearInterval(timer);

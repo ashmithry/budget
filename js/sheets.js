@@ -338,7 +338,7 @@ export function openAfford(prefill = {}) {
       });
       el.querySelector("#wait").onclick = () => {
         const hrs = Number(s().settings.coolHours) || 48;
-        put("wish", { id: prefill.wishId || uid(), name: st.name || "Something", price, cat: st.cat, status: "waiting", added: Date.now(), unlockAt: Date.now() + hrs * 3600000 });
+        put("wish", { id: prefill.wishId || uid(), name: st.name || "Something", price, cat: st.cat, status: "waiting", short: false, added: Date.now(), unlockAt: Date.now() + hrs * 3600000 });
         sh.close();
         toast(`On your waitlist. Check back ${hrs >= 24 ? `in ${Math.round(hrs / 24)} day${hrs >= 48 ? "s" : ""}` : `in ${hrs} hours`}.`);
       };

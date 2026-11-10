@@ -276,3 +276,14 @@ test("widget in weekly mode: per-card left, parents' taps matched by card name, 
   assert.equal(w.parentsLeft, 20);
   assert.equal(w.daysLeftInWeek, 6);
 });
+
+test("importing history never changes the balance, even with round-ups on; imported rent isn't everyday spending", () => {
+  const t = "2026-11-10";
+  const s = base(t, { settings: { roundUpGoal: "g", roundUpFrom: "2026-10-01", lastUntil: "2026-12-19", anchor: { amount: 500, date: "2026-11-01", ts: 0 } }, goals: [{ id: "g", type: "goal", name: "Trip", target: 500 }] });
+  s.tx.push({ id: "i1", kind: "expense", amount: 7.25, note: "Boba", cat: "coffee", date: "2026-11-07", ts: 1, imported: true });
+  s.tx.push({ id: "i2", kind: "expense", amount: 900, note: "Rent", cat: "bills", date: "2026-11-01", ts: 1, imported: true });
+  autoRun(s, t);
+  assert.equal(spendable(s), 500);
+  assert.equal(goalSaved(s, "g"), 0);
+  assert.equal(leaks(s, t).length, 0);
+});

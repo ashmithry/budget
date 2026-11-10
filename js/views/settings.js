@@ -164,6 +164,7 @@ export function renderAutomate() {
   const tok = tokenCache;
   const base = ORIGIN;
   const logUrl = tok ? `${base}/api/log?t=${tok}&format=text` : "";
+  const payUrl = tok ? `${logUrl}&source=applepay` : "";
   const wUrl = tok ? `${base}/api/widget?t=${tok}` : "";
   const last = st.meta.lastSync ? new Date(st.meta.lastSync).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "never";
   const urlBox = (u) => `<div class="code" data-copy="${esc(u)}">${esc(u)}</div><button class="btn sm ghost" style="margin-top:8px" data-act="copy" data-v="${esc(u)}">Copy link</button>`;
@@ -181,7 +182,7 @@ export function renderAutomate() {
     <div class="status-box" id="linkstatus"><span class="muted small">Checking your link…</span></div>
     <p class="small muted">iPhone, iOS 17 or later. Works for Apple Pay / Wallet taps in stores (not online checkouts or card swipes). Takes about 2 minutes, once.</p>
     <ol class="steps">
-      <li><b>Copy your link</b>:${urlBox(logUrl)}</li>
+      <li><b>Copy your link</b>:${urlBox(payUrl)}</li>
       <li>Open <b>Shortcuts</b> › <b>Automation</b> (bottom) › <b>+</b> › <b>Transaction</b>. Under Card, select all your cards. Choose <b>Run Immediately</b> and turn <b>Notify When Run</b> off. Tap <b>Next</b> › <b>Create New Shortcut</b> (or New Blank Automation).</li>
       <li>Search actions for <b>Get Contents of URL</b> and tap it. Tap <b>URL</b> and paste your link.</li>
       <li>Tap the <b>›</b> on that action. Set <b>Method</b> to <b>POST</b> and <b>Request Body</b> to <b>JSON</b>.</li>

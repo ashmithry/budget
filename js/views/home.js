@@ -161,7 +161,7 @@ export const homeActions = {
   seen: (el) => put("tx", { id: el.dataset.id, seen: true }),
   "wish-skip": (el) => { const w = live(s().wish).find((x) => x.id === el.dataset.id); if (w) skipItem({ ...w }); },
   "wish-check": (el) => { const w = live(s().wish).find((x) => x.id === el.dataset.id); if (w) openAfford({ price: w.price, name: w.name, cat: w.cat, wishId: w.id }); },
-  "wish-later": (el) => { put("wish", { id: el.dataset.id, unlockAt: Date.now() + 24 * 3600000 }); toast("Okay, another day to think"); },
+  "wish-later": (el) => { put("wish", { id: el.dataset.id, short: false, unlockAt: Date.now() + 24 * 3600000 }); toast("Okay, another day to think"); },
   worth: (el) => {
     const v = el.dataset.v;
     put("tx", v === "skip" ? { id: el.dataset.id, worthSkip: true } : { id: el.dataset.id, worth: v });

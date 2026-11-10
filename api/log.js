@@ -5,15 +5,21 @@ import { rpc, validToken, params, parseAmount, widgetNumbers, money, send } from
 
 const CATS = /^[a-z0-9_-]{1,24}$/;
 
-// The amount field first; otherwise any currency-looking number in what the shortcut sent
-// (some setups pass the whole Shortcut Input as text instead of picking Amount).
+// The amount field first (when it looks like just an amount); otherwise a currency-looking number
+// from what the shortcut sent (some setups pass the whole Shortcut Input as text).
+const BARE = /^\s*[-−(]?\s*[$€£]?\s*[\d.,]+\s*[$€£]?\s*\)?\s*$/;
+const MONEY = /-?\s?[$€£]\s?\d[\d.,]*|\d[\d.,]*\s?[$€£]|\d[\d,]*\.\d{2}\b/;
 function findAmount(p) {
-  const direct = parseAmount(p.amount);
-  if (Number.isFinite(direct) && direct !== 0) return direct;
+  if (typeof p.amount === "number") return p.amount;
+  const a = String(p.amount ?? "").trim().replace(/−/g, "-");
+  if (a && BARE.test(a)) {
+    const n = parseAmount(a);
+    if (Number.isFinite(n) && n !== 0) return n;
+  }
   for (const v of [p.amount, p.input, p.text, p.transaction]) {
-    const m = String(v ?? "").match(/[-−]?\s?[$€£]\s?\d[\d,]*(?:\.\d{1,2})?|\d[\d,]*\.\d{2}/);
+    const m = String(v ?? "").replace(/−/g, "-").match(MONEY);
     if (m) {
-      const n = parseAmount(m[0].replace("−", "-"));
+      const n = parseAmount(m[0]);
       if (Number.isFinite(n) && n !== 0) return n;
     }
   }
@@ -26,8 +32,10 @@ export default async function handler(req, res) {
   if (!validToken(t)) return send(res, req, 400, { ok: false, error: "missing or bad token", text: "Not logged: the link is missing your token. Copy it again from the app." });
   // A run with no amount at all (running the shortcut by hand to grant iOS's "Allow to connect" prompt)
   // is a connection test: nothing is logged.
-  const anyAmount = [p.amount, p.input, p.text, p.transaction].some((x) => String(x ?? "").trim() !== "");
-  if (!anyAmount) {
+  // Only a run where everything is empty is a test. A real tap that has a store but no readable amount is an error,
+  // so a misconfigured shortcut never looks "connected" while purchases are dropped.
+  const sent = [p.amount, p.input, p.text, p.transaction, p.merchant, p.note, p.card].some((x) => String(x ?? "").trim() !== "");
+  if (!sent) {
     try {
       const st = await rpc("budget_link_status", { p_token: t, p_mark_test: true });
       if (!st.ok) return send(res, req, 400, { ok: false, error: "unknown link", text: "Not connected: this link isn't linked to a budget. In the app, go to Automate and copy the link again." });

@@ -67,7 +67,8 @@ export function goalSaved(state, goalId) {
 }
 
 // Flexible spending = what the daily allowance covers (everything except auto-posted bills and subscriptions).
-export const isFlex = (tx) => tx.kind === "expense" && tx.source !== "bill";
+// Imported rent / subscriptions are fixed costs, not everyday spending.
+export const isFlex = (tx) => tx.kind === "expense" && tx.source !== "bill" && !(tx.imported && (tx.cat === "bills" || tx.cat === "subs"));
 // Who paid: your own card/cash ("mine") or your parents' card ("parents").
 export const walletOf = (tx) => (tx.wallet === "parents" ? "parents" : "mine");
 export const isWeekly = (state) => state.settings.period === "week";
@@ -359,7 +360,8 @@ export function autoRun(state, t = today()) {
     const from = state.settings.roundUpFrom || t;
     for (let d = from > addDays(t, -7) ? from : addDays(t, -7); d < t; d = addDays(d, 1)) {
       let spare = 0;
-      for (const tx of live(state.tx)) if (tx.date === d && isFlex(tx) && Number(tx.amount) > 0) spare += Math.ceil(Number(tx.amount) - 1e-9) - Number(tx.amount);
+      // Only real purchases from your own money: imported history and the parents' card never move your balance.
+      for (const tx of live(state.tx)) if (tx.date === d && isFlex(tx) && !tx.imported && walletOf(tx) === "mine" && Number(tx.amount) > 0) spare += Math.ceil(Number(tx.amount) - 1e-9) - Number(tx.amount);
       spare = round2(spare);
       const id = `ru:${d}`;
       const cur = state.tx.find((x) => x.id === id);
@@ -459,14 +461,17 @@ export function weekReview(state, t = today()) {
   let under = 0;
   let tracked = 0;
   let noSpend = 0;
+  // Spending totals use every purchase (imported and parents' card included), the same rule as last week's total.
+  // The under-limit check compares against the daily number, which only ever covers your own live spending.
+  const spentOn = (d) => round2(txIn(state, d, d, isFlex).reduce((a, x) => a + (Number(x.amount) || 0), 0));
   for (let d = start; d <= end; d = addDays(d, 1)) {
-    const s = flexOn(state, d);
-    spent += s;
-    if (s <= 0) noSpend++;
+    const all = spentOn(d);
+    spent += all;
+    if (all <= 0) noSpend++;
     if (state.days?.[d]) {
       tracked++;
       allowance += state.days[d].base;
-      if (s <= state.days[d].base + 0.005) under++;
+      if (flexOn(state, d) <= state.days[d].base + 0.005) under++;
     }
   }
   const prevSpent = txIn(state, addDays(start, -7), addDays(start, -1), isFlex).reduce((s, x) => s + (Number(x.amount) || 0), 0);
@@ -481,7 +486,7 @@ export function needsWorthCheck(state, t = today()) {
   const big = Number(state.settings.bigPurchase) || 25;
   const from = addDays(t, -10);
   return live(state.tx)
-    .filter((x) => isFlex(x) && !x.worth && !x.worthSkip && x.date >= from && x.date < t && Number(x.amount) >= big && x.mood !== "need")
+    .filter((x) => isFlex(x) && !x.imported && !x.worth && !x.worthSkip && x.date >= from && x.date < t && Number(x.amount) >= big && x.mood !== "need")
     .sort((a, b) => (b.amount || 0) - (a.amount || 0))
     .slice(0, 3);
 }

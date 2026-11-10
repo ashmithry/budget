@@ -128,7 +128,7 @@ async function importTx(p) {
   if (!text || !cats.length) return { ok: true, transactions: [] };
   const out = await ask({
     maxTokens: 16000,
-    system: "You convert pasted bank or card statement text into transactions for a budgeting app. Each line or row may include a date, a description/merchant, and an amount; formats vary by bank (CSV, copied tables, app screenshots as text). Skip balances, headers, totals, pending holds that also appear posted, and transfers between the person's own accounts or to savings. Money out is 'expense'; money in from work, clients, family or Venmo is 'income'; returns are 'refund'. Clean merchant names (e.g. 'SQ *BOBA GUYS 0423' becomes 'Boba Guys'). Dates are YYYY-MM-DD; if the year is missing, use the most recent past date that fits given today.",
+    system: "You convert pasted bank or card statement text into transactions for a budgeting app. Each line or row may include a date, a description/merchant, and an amount; formats vary by bank (CSV, copied tables, app screenshots as text). Skip balances, headers, totals, pending holds that also appear posted, and transfers between the person's own accounts or to savings. Amounts are always positive numbers; the kind says the direction. Money out is 'expense'; money in from work, clients, family or Venmo is 'income'; returns are 'refund'. Clean merchant names (e.g. 'SQ *BOBA GUYS 0423' becomes 'Boba Guys'). Dates are YYYY-MM-DD; if the year is missing, use the most recent past date that fits given today.",
     user: `Today is ${today}.\nCategories (id: name):\n${cats.map((c) => `${c.id}: ${c.name}`).join("\n")}\n\nStatement text:\n${text}`,
     schema: {
       type: "object",
@@ -147,8 +147,15 @@ async function importTx(p) {
       additionalProperties: false,
     },
   });
-  const ok = (x) => /^\d{4}-\d{2}-\d{2}$/.test(x.date) && x.date <= today && x.amount > 0 && x.amount < 100000;
-  return { ok: true, transactions: (out.transactions || []).filter(ok).slice(0, 400).map((x) => ({ ...x, merchant: String(x.merchant).slice(0, 60) })) };
+  // Amounts are positive; kind carries the direction. Reject impossible dates like 2026-02-30.
+  const realDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && new Date(d + "T12:00:00Z").toISOString().slice(0, 10) === d;
+  return {
+    ok: true,
+    transactions: (out.transactions || [])
+      .map((x) => ({ ...x, amount: Math.round(Math.abs(Number(x.amount)) * 100) / 100, merchant: String(x.merchant).slice(0, 60) }))
+      .filter((x) => realDate(x.date) && x.date <= today && x.amount > 0 && x.amount < 100000)
+      .slice(0, 400),
+  };
 }
 
 // The voice on the cool-down screen: one or two lines, specific to this purchase and their history.
