@@ -1,6 +1,6 @@
 import { get, put, remove, runAutomation, setSettings } from "../store.js";
 import { today, addDays, diffDays, pretty, prettyIn, FREQS, PER_MONTH, dayOfMonth } from "../dates.js";
-import { compute, live, categoryMonth, categories, goalSaved, recurringMonthly, incomeMonthly, round2, uid, resisted, catById } from "../engine.js";
+import { compute, weekly, isWeekly, live, categoryMonth, categories, goalSaved, recurringMonthly, incomeMonthly, round2, uid, resisted, catById } from "../engine.js";
 import { esc, money, toast, plural, costFrame, ic, tile, catTile, catLook } from "../ui.js";
 
 // Older data stored an emoji; anything without an icon gets a sensible one.
@@ -30,10 +30,13 @@ function budgets() {
   const left = round2(inc - bills - goalsM - totalLimits);
   const c = compute(st);
   return `
-  <div class="card nudge-card ${c.cap ? "ok" : "info"}"><div class="nudge"><span class="nic">${ic("gauge", { size: 18 })}</span><div class="grow">
+  ${isWeekly(st) ? (() => { const wk = weekly(st); return `<div class="card nudge-card ok"><div class="nudge"><span class="nic">${ic("calendar-days", { size: 18 })}</span><div class="grow">
+    <div class="t">Weekly: ${money(wk.mine.limit)} on my card${wk.parents.limit > 0 ? ` + ${money(wk.parents.limit)} on parents'` : ""}</div>
+    <div class="d">This week: ${money(wk.mine.left)} left on my card${wk.parents.limit > 0 ? `, ${money(wk.parents.left)} on parents'` : ""}. Your money supports up to ${money(wk.affordableWeekly, { cents: false })}/week through ${pretty(wk.periodEnd, { full: true })}.</div>
+    <div class="btns"><button class="btn sm ghost" data-act="weekly">Change</button></div></div></div></div>`; })() : `  <div class="card nudge-card ${c.cap ? "ok" : "info"}"><div class="nudge"><span class="nic">${ic("gauge", { size: 18 })}</span><div class="grow">
     <div class="t">${c.cap ? `Daily limit: ${money(c.cap)}` : "No daily limit set"}</div>
     <div class="d">The math allows ${money(c.rawDaily)} a day through ${pretty(c.end, { full: true })}.${c.cap && c.capped ? ` Your limit keeps about ${money((c.rawDaily - c.cap) * c.daysLeft, { cents: false })} unspent by then.` : " A lower limit means more stays in your account."}</div>
-    <div class="btns"><button class="btn sm ${c.cap ? "ghost" : "primary"}" data-act="limit">${c.cap ? "Change limit" : "Set a daily limit"}</button></div></div></div></div>
+    <div class="btns"><button class="btn sm ${c.cap ? "ghost" : "primary"}" data-act="limit">${c.cap ? "Change limit" : "Set a daily limit"}</button></div></div></div></div>`}
   ${inc > 0 ? `<div class="card"><h2>Monthly plan</h2>
     <div class="row between"><span>Income</span><b class="num">${money(inc, { cents: false })}</b></div>
     <div class="row between muted"><span>Bills & subscriptions</span><span class="num">−${money(bills, { cents: false })}</span></div>

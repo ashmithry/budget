@@ -29,6 +29,11 @@ Why each feature exists: see [RESEARCH.md](RESEARCH.md).
 - **App-icon badge** = today's dollars left (iOS 16.4+ Home Screen apps).
 - **Android**: long-press shortcuts (manifest), MacroDroid/Tasker → `/api/log`, KWGT → `/api/widget`.
 
+### Weekly budgets by card
+- Budget by the week instead of the day: one weekly amount for your own card and an optional one for a parents' card (Plan › Budgets or the Home suggestion).
+- Every purchase is "paid with" your card or your parents' card. Parents'-card spending has its own weekly limit and never comes out of your balance. Apple Pay taps on a card whose Wallet name contains what you set (e.g. "Amex") are sorted automatically.
+- Home shows what's left this week per card and whether your weekly amount lasts until your end date.
+
 ### Stopping the spend
 - **Daily limit:** cap your daily number below what the math allows; the rest stays in your account.
 - **Cool-down timers:** food and coffee/boba (configurable per category: 5 to 30 min) make you wait before buying. A full-screen countdown shows your own 30-day spending in that category, the cost in days of budget, what skipping does to today, your regret record, and a note from Claude. "Buy anyway" unlocks only when the timer ends; skipping is celebrated.

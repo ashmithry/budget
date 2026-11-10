@@ -120,6 +120,9 @@ function inboxTx(row) {
 function fileInbox(txs) {
   for (const tx of txs) {
     if (tx.kind !== "expense") { tx.cat = "income"; tx.review = false; continue; }
+    // Taps on your parents' card (matched by the card name you set) count toward their weekly limit.
+    const hint = String(get().settings.parentsCard || "").trim().toLowerCase();
+    if (hint && String(tx.card || "").toLowerCase().includes(hint)) tx.wallet = "parents";
     if (!tx.cat) tx.cat = guessCategory(get(), tx.note);
     const name = (tx.note || "").toLowerCase();
     const known = name && live(get().tx).some((x) => x !== tx && x.kind === "expense" && !x.review && (x.note || "").toLowerCase() === name);

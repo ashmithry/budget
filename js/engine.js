@@ -50,7 +50,8 @@ export function spendable(state) {
   const anchor = state.settings.anchor || { amount: 0, date: "1970-01-01", ts: 0 };
   let total = Number(anchor.amount) || 0;
   // Imported history (pasted from your bank) is already reflected in your balance: insights only.
-  for (const tx of live(state.tx)) if (!tx.imported && afterAnchor(tx, anchor)) total += effect(tx);
+  // Parents'-card spending isn't your money: it has its own weekly limit and never touches your balance.
+  for (const tx of live(state.tx)) if (!tx.imported && walletOf(tx) === "mine" && afterAnchor(tx, anchor)) total += effect(tx);
   return round2(total);
 }
 
@@ -67,10 +68,13 @@ export function goalSaved(state, goalId) {
 
 // Flexible spending = what the daily allowance covers (everything except auto-posted bills and subscriptions).
 export const isFlex = (tx) => tx.kind === "expense" && tx.source !== "bill";
+// Who paid: your own card/cash ("mine") or your parents' card ("parents").
+export const walletOf = (tx) => (tx.wallet === "parents" ? "parents" : "mine");
+export const isWeekly = (state) => state.settings.period === "week";
 
 export function flexOn(state, day) {
   let s = 0;
-  for (const tx of live(state.tx)) if (tx.date === day && isFlex(tx) && !tx.imported) s += Number(tx.amount) || 0;
+  for (const tx of live(state.tx)) if (tx.date === day && isFlex(tx) && !tx.imported && walletOf(tx) === "mine") s += Number(tx.amount) || 0;
   return round2(s);
 }
 
@@ -156,7 +160,7 @@ export function compute(state, t = today()) {
 }
 
 // What a purchase would do to the numbers, for the "Can I afford it?" check.
-export function impact(state, price, cat, t = today()) {
+export function impact(state, price, cat, t = today(), wallet = "mine") {
   const c = compute(state, t);
   const p = Number(price) || 0;
   const leftAfter = round2(c.leftToday - p);
@@ -179,7 +183,19 @@ export function impact(state, price, cat, t = today()) {
   else if (budget && budget.leftAfter < 0) verdict = "tight";
   const goals = live(state.goals).filter((g) => g.type !== "stretch" && !g.taxes && Number(g.target) > goalSaved(state, g.id));
   const goal = goals[0] ? { name: goals[0].name, icon: goals[0].icon, pct: Math.round((p / Number(goals[0].target)) * 100) } : null;
-  return { ...c, price: p, leftAfter, poolAfter, dailyAfter, overToday, hours, budgetDays, budget, verdict, goal };
+  // Weekly budgets: judge the purchase against what's left this week on the card you'd pay with.
+  let week = null;
+  if (isWeekly(state)) {
+    const wk = weekly(state, t);
+    const w = wk[wallet === "parents" ? "parents" : "mine"];
+    week = { wallet, limit: w.limit, leftBefore: w.left, leftAfter: round2(w.left - p), pctOfWeek: wk.limit > 0 ? p / wk.limit : null, daysLeftInWeek: wk.daysLeftInWeek, resets: addDays(wk.end, 1) };
+    verdict = "fits";
+    if (wallet !== "parents" && poolAfter < 0) verdict = "no";
+    else if (w.limit > 0 && week.leftAfter < 0) verdict = "no";
+    else if (w.limit > 0 && week.leftAfter < w.limit * 0.2) verdict = "tight";
+    else if (budget && budget.leftAfter < 0) verdict = "tight";
+  }
+  return { ...c, price: p, leftAfter, poolAfter, dailyAfter, overToday, hours, budgetDays, budget, verdict, goal, week };
 }
 
 export function categories(state) {
@@ -484,6 +500,7 @@ export function snapshot(state, t = today()) {
     spentToday: c.spentToday,
     pool: c.pool,
     cap: Number(state.settings.dailyCap) || 0,
+    ...(isWeekly(state) ? (() => { const wk = weekly(state, t); return { mode: "week", weekStart: wk.start, weekEnd: wk.end, mineLimit: wk.mine.limit, mineSpent: wk.mine.spent, parentsLimit: wk.parents.limit, parentsSpent: wk.parents.spent, parentsHint: String(state.settings.parentsCard || "").slice(0, 30) }; })() : {}),
     streak: noSpendStreak(state, t),
     cur: state.settings.currency || "$",
   };
@@ -505,4 +522,43 @@ export function categoryStats(state, cat, t = today(), days = 30) {
     late: txs.filter((x) => x.late).length,
     top: Object.entries(txs.reduce((m, x) => ((m[x.note || "?"] = (m[x.note || "?"] || 0) + 1), m), {})).sort((a, b) => b[1] - a[1])[0] || null,
   };
+}
+
+
+/* ---------- weekly budgets ---------- */
+
+// First day of the week containing t (startDow: 0 = Sunday, 1 = Monday).
+export function weekStartOf(t, startDow = 1) {
+  return addDays(t, -((weekday(t) - startDow + 7) % 7));
+}
+
+// This week's limits and spending on each card, pace, and how long your own money lasts at your weekly amount.
+export function weekly(state, t = today()) {
+  const startDow = Number(state.settings.weekStartDow ?? 1);
+  const start = weekStartOf(t, startDow);
+  const end = addDays(start, 6);
+  const limits = state.settings.weekly || {};
+  const out = {};
+  for (const w of ["mine", "parents"]) {
+    const limit = Number(limits[w]) || 0;
+    let spent = 0;
+    for (const tx of live(state.tx)) if (isFlex(tx) && walletOf(tx) === w && tx.date >= start && tx.date <= t) spent += Number(tx.amount) || 0;
+    spent = round2(spent);
+    out[w] = { limit, spent, left: round2(limit - spent) };
+  }
+  const limit = round2(out.mine.limit + out.parents.limit);
+  const spent = round2(out.mine.spent + out.parents.spent);
+  const left = round2(limit - spent);
+  const daysLeftInWeek = diffDays(t, end) + 1;
+  const paceLeft = (limit * daysLeftInWeek) / 7;
+  let status = "good";
+  if (left < 0 || out.mine.left < 0 || out.parents.left < 0) status = "over";
+  else if (daysLeftInWeek > 1 && left < paceLeft * 0.5) status = "tight";
+  const c = compute(state, t);
+  const perDay = out.mine.limit / 7;
+  const runwayDays = perDay > 0 ? Math.floor(Math.max(c.pool, 0) / perDay) : null;
+  const runsOut = runwayDays != null ? addDays(t, runwayDays) : null;
+  // The most per week your own money supports until your end date / next money.
+  const affordableWeekly = round2((Math.max(c.pool, 0) / Math.max(1, c.daysLeft)) * 7);
+  return { start, end, daysLeftInWeek, mine: out.mine, parents: out.parents, limit, spent, left, status, runsOut, lastsToEnd: !runsOut || runsOut >= c.end, periodEnd: c.end, scheduled: c.scheduled, affordableWeekly, pool: c.pool };
 }

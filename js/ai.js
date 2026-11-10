@@ -36,7 +36,7 @@ export async function ai(task, payload = {}) {
 }
 
 /* ---------- what Claude sees ---------- */
-import { compute, live as liveOf, categoryMonth, catById, leaks, moodStats, regretStats, isFlex, goalSaved, txIn, resisted, MOODS } from "./engine.js";
+import { compute, weekly, isWeekly, live as liveOf, categoryMonth, catById, leaks, moodStats, regretStats, isFlex, goalSaved, txIn, resisted, MOODS } from "./engine.js";
 import { today as todayStr, addDays } from "./dates.js";
 
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -48,10 +48,12 @@ export function budgetContext(st = get()) {
   const recent = txIn(st, addDays(t, -45), t, (x) => x.kind === "expense" || x.kind === "income")
     .sort((a, b) => (a.date < b.date ? 1 : -1))
     .slice(0, 150)
-    .map((x) => ({ d: x.date, what: x.note || catById(st, x.cat).name, amt: x.amount, kind: x.kind === "income" ? "in" : undefined, cat: catById(st, x.cat).name, why: x.mood ? MOODS.find((m) => m.id === x.mood)?.label : undefined, worth: x.worth, late: x.late || undefined }));
+    .map((x) => ({ d: x.date, what: x.note || catById(st, x.cat).name, amt: x.amount, paidWith: x.wallet === "parents" ? "parents' card" : undefined, kind: x.kind === "income" ? "in" : undefined, cat: catById(st, x.cat).name, why: x.mood ? MOODS.find((m) => m.id === x.mood)?.label : undefined, worth: x.worth, late: x.late || undefined }));
   return {
     today: t,
     currency: st.settings.currency || "$",
+    budgetsBy: isWeekly(st) ? "week" : "day",
+    thisWeek: isWeekly(st) ? (() => { const wk = weekly(st, t); return { weekStart: wk.start, resets: addDays(wk.end, 1), myCard: wk.mine, parentsCard: wk.parents.limit > 0 ? wk.parents : null, daysLeftInWeek: wk.daysLeftInWeek, myMoneyLastsUntilAtThisPace: wk.runsOut, mostPerWeekMyMoneySupports: wk.affordableWeekly }; })() : undefined,
     payType: st.settings.payType || "unknown",
     safeToSpendToday: c.leftToday,
     dailyNumber: c.dailyBase,

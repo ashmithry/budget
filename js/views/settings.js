@@ -266,15 +266,16 @@ const cur = d.cur || "$";
 const fmt = (n) => (n < 0 ? "-" : "") + cur + (Math.abs(n) >= 100 ? Math.round(Math.abs(n)).toString() : Math.abs(n).toFixed(2).replace(/\.00$/, ""));
 const st = d.ok ? d.status : "off";
 const live_ = st === "good" || st === "tight";
-const head = { good: "Safe to spend", tight: "Safe to spend", over: "Over today", short: "Short before payday", stale: "New pay period", off: "Budget" }[st] || "Budget";
-const big = live_ ? fmt(d.left) : st === "over" ? fmt(-d.left) : st === "short" ? fmt(-d.pool) : "Open app";
-const sub = live_ ? fmt(d.daily) + "/day, " + d.daysLeft + " days left" : st === "over" && d.tomorrow != null ? "Tomorrow " + fmt(d.tomorrow) + "/day" : d.text || "";
+const head = wk ? (st === "over" ? "Over this week" : "Left this week") : { good: "Safe to spend", tight: "Safe to spend", over: "Over today", short: "Short before payday", stale: "New pay period", off: "Budget" }[st] || "Budget";
+const wk = d.mode === "week";
+const big = live_ ? fmt(d.left) : st === "over" ? (wk ? fmt(Math.min(d.mineLeft, d.parentsLeft)) : fmt(-d.left)) : st === "short" ? fmt(-d.pool) : "Open app";
+const sub = wk && d.ok ? ("Card " + fmt(d.mineLeft) + (d.parentsLimit > 0 ? ", parents " + fmt(d.parentsLeft) : "") + ", " + d.daysLeftInWeek + "d left") : live_ ? fmt(d.daily) + "/day, " + d.daysLeft + " days left" : st === "over" && d.tomorrow != null ? "Tomorrow " + fmt(d.tomorrow) + "/day" : d.text || "";
 const w = new ListWidget();
 // No w.url: on iPhone a link would open Safari, which can't see the Home Screen app's data.
 w.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000);
 const fam = config.widgetFamily || "small";
 if (fam === "accessoryInline") {
-  w.addText(live_ ? fmt(d.left) + " left today" : st === "over" ? "Over by " + fmt(-d.left) : st === "short" ? "Short " + fmt(-d.pool) : "Budget: open the app");
+  w.addText(wk && d.ok ? fmt(d.left) + " left this week" : live_ ? fmt(d.left) + " left today" : st === "over" ? "Over by " + fmt(-d.left) : st === "short" ? "Short " + fmt(-d.pool) : "Budget: open the app");
 } else if (fam === "accessoryCircular") {
   const a = w.addText(live_ || st === "over" ? big : "!"); a.font = Font.boldSystemFont(14); a.centerAlignText(); a.minimumScaleFactor = 0.5;
   const b = w.addText(st === "over" ? "over" : "today"); b.font = Font.systemFont(10); b.centerAlignText();

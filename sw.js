@@ -1,5 +1,5 @@
 // Offline support: network first (so updates show up right away), cached copy when offline.
-const CACHE = "budget-v7";
+const CACHE = "budget-v8";
 const SHELL = [
   "/", "/index.html", "/manifest.webmanifest", "/css/app.css",
   "/js/app.js", "/js/ai.js", "/js/cooldown.js", "/js/views/ask.js", "/js/views/importer.js", "/js/icons.js", "/js/store.js", "/js/engine.js", "/js/dates.js", "/js/ui.js", "/js/sheets.js", "/js/sync.js", "/js/badge.js",

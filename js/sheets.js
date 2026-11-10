@@ -1,8 +1,8 @@
 // Bottom sheets: log spending, edit, "Can I afford it?", and the generic edit form used by Plan.
 import { get, put, remove, commit, setSettings } from "./store.js";
 import { today, addDays, pretty } from "./dates.js";
-import { compute, impact, categories, catById, guessCategory, goalSaved, MOODS, live, round2, normMerchant, uid, categoryStats } from "./engine.js";
-import { sheet, esc, money, hoursText, costFrame, toast, haptic, confirmSheet, ic, chip, catLook, topSheet } from "./ui.js";
+import { compute, impact, categories, catById, guessCategory, goalSaved, MOODS, live, round2, normMerchant, uid, categoryStats, weekly, isWeekly } from "./engine.js";
+import { sheet, esc, money, hoursText, costFrame, hasParentsCard, walletToggle, toast, haptic, confirmSheet, ic, chip, catLook, topSheet } from "./ui.js";
 import { ai, AIError } from "./ai.js";
 import { pauseMinutes, startCooldown } from "./cooldown.js";
 
@@ -72,6 +72,7 @@ export function openAdd(prefill = {}) {
     mood: editing?.mood || null,
     date: editing?.date || today(),
     refund: editing ? editing.amount < 0 : false,
+    wallet: editing?.wallet || prefill.wallet || "mine",
     catTouched: !!(editing?.cat || prefill.cat),
   };
   const merchants = recentMerchants();
@@ -85,6 +86,7 @@ export function openAdd(prefill = {}) {
         <button data-kind="income" class="${st.kind === "income" ? "on" : ""}">Got money</button>
       </div>
       ${editing || !get().meta.key ? "" : `<div class="type-it"><input class="in" id="nl" placeholder="Or type it: 23 on pizza with friends" value="${esc(st.nl || "")}" autocomplete="off" enterkeyhint="go"><button type="button" class="btn sm primary" id="nlgo" aria-label="Fill in with Claude">${ic("pencil", { size: 16 })}Fill in</button></div>`}
+      ${st.kind === "expense" && hasParentsCard() ? walletToggle(st.wallet) : ""}
       <div class="amount-display num" id="amt">${amountHTML(st.amt)}</div>
       <div class="amount-hint" id="hint"></div>
       <label class="f"><input class="in" id="note" list="merchants" placeholder="${st.kind === "income" ? "From? (job, parents, Venmo…)" : "Where? (Chipotle, Target…)"}" value="${esc(st.note)}" autocomplete="off" enterkeyhint="done">
@@ -109,6 +111,14 @@ export function openAdd(prefill = {}) {
     const c = compute(s());
     const cf = costFrame(a);
     const hrs = cf ? `, ${cf}` : "";
+    if (isWeekly(s())) {
+      const w = weekly(s())[st.wallet === "parents" ? "parents" : "mine"];
+      const back = editing && (editing.wallet || "mine") === st.wallet && editing.date >= weekly(s()).start ? Number(editing.amount) : 0;
+      const left = round2(w.left + back - a);
+      const who = st.wallet === "parents" ? "parents' card" : "my card";
+      el.innerHTML = w.limit > 0 ? (left >= 0 ? `<span class="good">Leaves ${money(left)} this week on ${who}</span><span class="muted">${hrs}</span>` : `<span class="over">${money(-left)} over this week on ${who}</span><span class="muted">${hrs}</span>`) : `<span class="muted">${hrs.slice(2)}</span>`;
+      return;
+    }
     const base = editing && editing.date === today() ? c.leftToday + Number(editing.amount) : c.leftToday;
     const after = round2(base - a);
     if (st.date !== today()) el.innerHTML = `<span class="muted">${hrs.slice(2).replace(/^./, (m) => m.toUpperCase())}</span>`;
@@ -121,6 +131,7 @@ export function openAdd(prefill = {}) {
 
   sh.bind = (el) => {
     el.querySelector("[data-close]").onclick = () => sh.close();
+    el.querySelectorAll("[data-wallet]").forEach((b) => (b.onclick = () => { st.wallet = b.dataset.wallet; sh.render(); }));
     el.querySelectorAll("[data-kind]").forEach((b) => (b.onclick = () => {
       st.refund = b.dataset.kind === "refund";
       st.kind = b.dataset.kind === "income" ? "income" : "expense";
@@ -225,6 +236,7 @@ export function openAdd(prefill = {}) {
       date: st.date,
       source: editing?.source || "manual",
       review: false,
+      wallet: st.kind === "expense" && st.wallet === "parents" ? "parents" : undefined,
     };
     if (!editing) { tx.ts = Date.now(); tx.late = st.date === today() && (h >= 22 || h < 4); }
     saved = true;
@@ -241,7 +253,9 @@ export function openAdd(prefill = {}) {
       const after = compute(s());
       const cs = categoryStats(s(), tx.cat);
       const habit = cs.n >= 3 && ["food", "coffee", "shopping", "fun"].includes(tx.cat) ? ` That's ${cs.n} ${catById(s(), tx.cat).name.toLowerCase()} buys in 30 days (${money(cs.total)}).` : "";
-      const msg = (after.leftToday >= 0 ? `Logged. ${money(after.leftToday)} left today.` : `Logged. ${money(-after.leftToday)} over today.`) + habit;
+      const wl = isWeekly(s()) ? weekly(s())[tx.wallet === "parents" ? "parents" : "mine"] : null;
+      const who = tx.wallet === "parents" ? "parents' card" : "your card";
+      const msg = (wl && wl.limit > 0 ? (wl.left >= 0 ? `Logged. ${money(wl.left)} left this week on ${who}.` : `Logged. ${money(-wl.left)} over this week on ${who}.`) : after.leftToday >= 0 ? `Logged. ${money(after.leftToday)} left today.` : `Logged. ${money(-after.leftToday)} over today.`) + habit;
       toast(msg, { label: "Undo", run: () => remove("tx", tx.id) });
       prefill.onDone?.(tx, before, after);
     } else if (!editing && st.kind === "income" && st.tax && taxPct() > 0) {
@@ -255,12 +269,13 @@ export function openAdd(prefill = {}) {
 
 /* ---------- Can I afford it? ---------- */
 export function openAfford(prefill = {}) {
-  const st = { amt: prefill.price ? String(prefill.price) : "", name: prefill.name || "", cat: prefill.cat || null, step: prefill.price ? "verdict" : "ask" };
+  const st = { amt: prefill.price ? String(prefill.price) : "", name: prefill.name || "", cat: prefill.cat || null, step: prefill.price ? "verdict" : "ask", wallet: prefill.wallet || "mine" };
   const sh = sheet(() => (st.step === "ask" ? askHTML() : verdictHTML()));
 
   function askHTML() {
     return `<h3>Thinking of buying something?<button data-close>Cancel</button></h3>
       <p class="muted" style="margin:-6px 0 6px">Check before you tap. See what it really costs you.</p>
+      ${hasParentsCard() ? walletToggle(st.wallet) : ""}
       <div class="amount-display num" id="amt">${amountHTML(st.amt)}</div>
       <label class="f"><input class="in" id="what" placeholder="What is it? (optional)" value="${esc(st.name)}" autocomplete="off"></label>
       <div class="chips scroll" id="cats">${catOrder().map((c) => chip(catLook(c).icon, c.name, st.cat === c.id, `data-cat="${c.id}"`, catLook(c).color)).join("")}</div>
@@ -269,12 +284,14 @@ export function openAfford(prefill = {}) {
   }
 
   function verdictHTML() {
-    const r = impact(s(), parseFloat(st.amt) || 0, st.cat);
+    const r = impact(s(), parseFloat(st.amt) || 0, st.cat, today(), st.wallet);
+    const who = st.wallet === "parents" ? "parents' card" : "my card";
     const rules = live(s().rules).filter((x) => !x.cat || x.cat === st.cat);
     const head = { fits: "It fits", tight: "It's tight", no: "Not right now" }[r.verdict];
     const headIc = { fits: "circle-check", tight: "triangle-alert", no: "ban" }[r.verdict];
     const lines = [];
     if (r.pool < 0) lines.push(["triangle-alert", `You're already <b>${money(-r.pool)}</b> short for bills before ${r.scheduled ? "payday" : pretty(r.end)}. This would make it ${money(-r.poolAfter)}.`]);
+    else if (r.week && r.week.limit > 0) lines.push(r.week.leftAfter >= 0 ? ["wallet", `Leaves <b>${money(r.week.leftAfter)}</b> of this week's ${money(r.week.limit, { cents: false })} on ${who}`] : ["trending-down", `Puts you <b>${money(-r.week.leftAfter)}</b> over this week on ${who}. It resets ${pretty(r.week.resets)}.`]);
     else if (r.leftAfter >= 0) lines.push(["wallet", `Leaves <b>${money(r.leftAfter)}</b> of today's ${money(r.dailyBase)}`]);
     else lines.push(["trending-down", `Puts you <b>${money(r.overToday)}</b> over today. ${r.dailyAfter != null ? `Every day until ${pretty(r.end)} drops to <b>${money(r.dailyAfter)}</b> (from ${money(r.tomorrowDaily ?? r.dailyBase)})` : (r.scheduled ? "That's the end of your money until next payday" : "That's the end of your money until your end date")}`]);
     if (r.hours != null) lines.push(["clock", `That's <b>${hoursText(r.hours)}</b> at ${money(s().settings.wage)}/hr`]);
@@ -303,6 +320,7 @@ export function openAfford(prefill = {}) {
     el.querySelector("[data-close]").onclick = () => sh.close();
     if (st.step === "ask") {
       el.querySelectorAll("[data-k]").forEach((b) => (b.onclick = () => { st.amt = pressKey(st.amt, b.dataset.k); el.querySelector("#amt").innerHTML = amountHTML(st.amt); haptic(5); }));
+      el.querySelectorAll("[data-wallet]").forEach((b) => (b.onclick = () => { st.wallet = b.dataset.wallet; st.name = el.querySelector("#what").value; sh.render(); }));
       el.querySelector("#what").oninput = (e) => {
         st.name = e.target.value;
         const g = guessCategory(s(), st.name);
@@ -316,7 +334,7 @@ export function openAfford(prefill = {}) {
       el.querySelector("#cool")?.addEventListener("click", () => {
         if (prefill.wishId) remove("wish", prefill.wishId); // the cool-down replaces the old waitlist entry
         sh.close();
-        startCooldown({ name: st.name, price, cat: st.cat || "other", minutes: st.mins });
+        startCooldown({ name: st.name, price, cat: st.cat || "other", minutes: st.mins, wallet: st.wallet });
       });
       el.querySelector("#wait").onclick = () => {
         const hrs = Number(s().settings.coolHours) || 48;
@@ -328,7 +346,7 @@ export function openAfford(prefill = {}) {
       el.querySelector("#buy").onclick = () => {
         if (prefill.wishId) put("wish", { id: prefill.wishId, status: "bought", decidedDay: today() });
         sh.close();
-        put("tx", { id: uid(), kind: "expense", amount: price, note: st.name, cat: st.cat || guessCategory(s(), st.name) || "other", date: today(), ts: Date.now(), source: "manual", mood: "treat" });
+        put("tx", { id: uid(), kind: "expense", amount: price, wallet: st.wallet === "parents" ? "parents" : undefined, note: st.name, cat: st.cat || guessCategory(s(), st.name) || "other", date: today(), ts: Date.now(), source: "manual", mood: "treat" });
         const c = compute(s());
         toast(c.leftToday >= 0 ? `Logged. ${money(c.leftToday)} left today` : `Logged. ${money(-c.leftToday)} over today`);
       };

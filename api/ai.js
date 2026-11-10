@@ -102,7 +102,7 @@ async function checkin(p) {
   return { ok: true, checkin: { headline: String(out.headline).slice(0, 120), body: String(out.body).slice(0, 700), tryThis: String(out.tryThis).slice(0, 300) } };
 }
 
-const COACH = "You are the money coach inside a budgeting app for a full-time college student who is paid by contracts (irregular income) and is actively trying to break an overspending habit, especially on food delivery, eating out, coffee and boba. You see their real numbers. Be specific: quote their actual amounts, counts, merchants and dates. Be direct and a little blunt, with dry humor; it's fine to make them feel the cost of a habit, but never cruel, never moralizing about their character, no shame about necessities like groceries or rent. Plain sentences, no emoji, no markdown headings. Never invent transactions or numbers that aren't in the data.";
+const COACH = "You are the money coach inside a budgeting app for a full-time college student who is paid by contracts (irregular income) and is actively trying to break an overspending habit, especially on food delivery, eating out, coffee and boba. You see their real numbers. Be specific: quote their actual amounts, counts, merchants and dates. Be direct and a little blunt, with dry humor; it's fine to make them feel the cost of a habit, but never cruel, never moralizing about their character, no shame about necessities like groceries or rent. Plain sentences, no emoji, no markdown headings. Never invent transactions or numbers that aren't in the data. If they budget by the week, talk in weekly amounts; spending on their parents' card has its own weekly limit and doesn't come out of their own balance. Only suggest things this app actually has: a weekly budget per card (my card / parents' card) or a daily limit, cool-down timers of 5-30 minutes per category (Plan › Budgets › tap a category), 'Can I afford it?' before buying, the waitlist (24-72 hours) for bigger wants, personal rules, a 'make my money last until' date, and logging contract pay with a tax set-aside.";
 
 const clip = (v, n) => JSON.stringify(v ?? null).slice(0, n);
 
@@ -165,7 +165,7 @@ async function nudge(p) {
 async function roast(p) {
   const out = await ask({
     effort: "medium",
-    system: `${COACH} Write a reality check of their recent spending. Lead with the habit that cost the most. Receipts are short, punchy lines with exact numbers (e.g. "14 boba runs in 30 days: $93, about 8 days of your budget"). "Could have been" turns the avoidable total into concrete things a student would actually want. End with one rule that would have saved the most.`,
+    system: `${COACH} Write a reality check of their recent spending. Lead with the habit that cost the most. Receipts are short, punchy lines with exact numbers (e.g. "14 boba runs in 30 days: $93, about 8 days of your budget"). Keep the headline under 14 words. "Could have been" is at most 2 sentences turning the avoidable total into concrete things a student would actually want. End with one rule that would have saved the most.`,
     user: `Their last ${Number(p.days) || 30} days (JSON):\n${clip(p.summary, 16000)}`,
     schema: {
       type: "object",
@@ -174,7 +174,7 @@ async function roast(p) {
       additionalProperties: false,
     },
   });
-  return { ok: true, roast: { headline: String(out.headline).slice(0, 140), receipts: (out.receipts || []).slice(0, 5).map((r) => String(r).slice(0, 200)), couldHaveBeen: String(out.couldHaveBeen).slice(0, 300), rule: String(out.rule).slice(0, 200) } };
+  return { ok: true, roast: { headline: String(out.headline).slice(0, 200), receipts: (out.receipts || []).slice(0, 5).map((r) => String(r).slice(0, 200)), couldHaveBeen: String(out.couldHaveBeen).slice(0, 600), rule: String(out.rule).slice(0, 200) } };
 }
 
 const TASKS = { categorize, parse, checkin, chat, import: importTx, nudge, roast };

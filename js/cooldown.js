@@ -2,7 +2,7 @@
 // in front of you. "Buy anyway" stays locked until the timer runs out. Skipping is celebrated.
 import { get, put } from "./store.js";
 import { today } from "./dates.js";
-import { compute, impact, categoryStats, catById, live, uid, round2 } from "./engine.js";
+import { compute, impact, categoryStats, catById, live, uid, round2, weekly, isWeekly } from "./engine.js";
 import { esc, money, ic, costFrame, toast, haptic, catLook } from "./ui.js";
 import { ai } from "./ai.js";
 
@@ -14,8 +14,8 @@ export function pauseMinutes(cat, st = get()) {
 }
 
 // Starts (or reopens) a cool-down. Returns the waitlist item that holds the timer.
-export function startCooldown({ name, price, cat, minutes }) {
-  const w = put("wish", { id: uid(), name: name || catById(get(), cat).name, price: round2(price), cat, status: "waiting", short: true, added: Date.now(), unlockAt: Date.now() + minutes * 60000 });
+export function startCooldown({ name, price, cat, minutes, wallet }) {
+  const w = put("wish", { id: uid(), name: name || catById(get(), cat).name, price: round2(price), cat, wallet: wallet === "parents" ? "parents" : undefined, status: "waiting", short: true, added: Date.now(), unlockAt: Date.now() + minutes * 60000 });
   openCooldown(w.id);
   return w;
 }
@@ -29,7 +29,8 @@ export function openCooldown(wishId) {
   const cat = catById(st, w.cat);
   const look = catLook(cat);
   const stats = categoryStats(st, w.cat);
-  const r = impact(st, w.price, w.cat);
+  const r = impact(st, w.price, w.cat, today(), w.wallet || "mine");
+  const who = w.wallet === "parents" ? "your parents' card" : "your card";
   const c = compute(st);
   const total = Math.max(1, Math.round((w.unlockAt - (w.added || Date.now())) / 1000));
 
@@ -44,7 +45,7 @@ export function openCooldown(wishId) {
       ? `<div class="cd-card"><div class="cd-stack" aria-hidden="true">${Array.from({ length: cups }, (_, i) => `<span style="animation-delay:${i * 60}ms">${ic(look.icon, { size: 18 })}</span>`).join("")}${stats.n > cups ? `<em>+${stats.n - cups}</em>` : ""}</div>
          <div class="cd-big">${stats.n} ${stats.n === 1 ? "time" : "times"} in 30 days</div><div class="cd-sub">${money(stats.total)} on ${esc(cat.name.toLowerCase())}${costFrame(stats.total) ? `, ${costFrame(stats.total)}` : ""}${stats.top && stats.top[1] > 1 ? `. ${esc(stats.top[0])} alone: ${stats.top[1]} times.` : "."}</div></div>`
       : "",
-    `<div class="cd-card"><div class="cd-big">${money(w.price)} is ${costFrame(w.price) || "real money"}</div><div class="cd-sub">${r.leftAfter >= 0 ? `Buy it and you have ${money(r.leftAfter)} left for today.` : `Buy it and you're ${money(-r.leftAfter)} over today; every day until ${esc(r.end.slice(5).replace("-", "/"))} drops to ${money(r.dailyAfter ?? 0)}.`} Skip it and you keep ${money(c.leftToday)} for today.</div></div>`,
+    `<div class="cd-card"><div class="cd-big">${money(w.price)} is ${costFrame(w.price) || "real money"}</div><div class="cd-sub">${r.week && r.week.limit > 0 ? (r.week.leftAfter >= 0 ? `Buy it and you have ${money(r.week.leftAfter)} left this week on ${who}, with ${r.week.daysLeftInWeek} ${r.week.daysLeftInWeek === 1 ? "day" : "days"} to go.` : `Buy it and you're ${money(-r.week.leftAfter)} over this week on ${who}.`) + ` Skip it and you keep ${money(r.week.leftBefore)}.` : r.leftAfter >= 0 ? `Buy it and you have ${money(r.leftAfter)} left for today.` : `Buy it and you're ${money(-r.leftAfter)} over today; every day until ${esc(r.end.slice(5).replace("-", "/"))} drops to ${money(r.dailyAfter ?? 0)}.`}${r.week && r.week.limit > 0 ? "" : ` Skip it and you keep ${money(c.leftToday)} for today.`}</div></div>`,
     stats.rated
       ? `<div class="cd-card"><div class="cd-big">You regretted ${stats.regretted} of ${stats.rated}</div><div class="cd-sub">That's your own rating of your recent ${esc(cat.name.toLowerCase())} buys.</div></div>`
       : stats.late
@@ -124,11 +125,12 @@ export function openCooldown(wishId) {
   buy.onclick = () => {
     if (buy.disabled) return;
     put("wish", { id: w.id, status: "bought", decidedDay: today() });
-    put("tx", { id: uid(), kind: "expense", amount: w.price, note: w.name, cat: w.cat, date: today(), ts: Date.now(), source: "manual" });
+    put("tx", { id: uid(), kind: "expense", amount: w.price, wallet: w.wallet, note: w.name, cat: w.cat, date: today(), ts: Date.now(), source: "manual" });
     close();
     const after = compute(get());
     const s2 = categoryStats(get(), w.cat);
-    toast(`Logged. That's ${s2.n} ${cat.name.toLowerCase()} buys this month (${money(s2.total)}). ${after.leftToday >= 0 ? `${money(after.leftToday)} left today.` : `${money(-after.leftToday)} over today.`}`);
+    const wl = isWeekly(get()) ? weekly(get())[w.wallet === "parents" ? "parents" : "mine"] : null;
+    toast(`Logged. That's ${s2.n} ${cat.name.toLowerCase()} buys in 30 days (${money(s2.total)}). ${wl && wl.limit > 0 ? (wl.left >= 0 ? `${money(wl.left)} left this week.` : `${money(-wl.left)} over this week.`) : after.leftToday >= 0 ? `${money(after.leftToday)} left today.` : `${money(-after.leftToday)} over today.`}`);
   };
 }
 

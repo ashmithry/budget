@@ -84,6 +84,7 @@ export function widgetNumbers(data, now = Date.now()) {
     if (dayAt(Number(p.at) || now, tz) === t) pendToday += a;
   }
   const cur = snap.cur || "$";
+  if (snap.mode === "week" && snap.weekStart) return weekNumbers(data, snap, t, tz, now, cur);
   let { dailyBase: base, spentToday: spent, daysLeft, pool } = snap;
   pool = pool - pendAll + incomeAll;
   let stale = false;
@@ -143,4 +144,40 @@ export function send(res, req, status, obj) {
     return res.status(status).send(obj.text || obj.error || "");
   }
   return res.status(status).json(obj);
+}
+
+
+// Weekly mode: what's left this week on your card and your parents' card, including taps logged since.
+function weekNumbers(data, snap, t, tz, now, cur) {
+  const r2 = (n) => Math.round(n * 100) / 100;
+  // Roll forward to the week containing today (the app may not have been opened since).
+  let start = snap.weekStart;
+  const weeksAhead = Math.floor(diffDays(snap.weekStart, t) / 7);
+  if (weeksAhead > 0) start = new Date(Date.parse(snap.weekStart + "T12:00:00Z") + weeksAhead * 7 * 86400000).toISOString().slice(0, 10);
+  const end = new Date(Date.parse(start + "T12:00:00Z") + 6 * 86400000).toISOString().slice(0, 10);
+  const same = start === snap.weekStart;
+  let mine = same ? Number(snap.mineSpent) || 0 : 0;
+  let parents = same ? Number(snap.parentsSpent) || 0 : 0;
+  const hint = String(snap.parentsHint || "").toLowerCase();
+  for (const p of data.pending || []) {
+    if (p.kind === "income") continue;
+    if (dayAt(Number(p.at) || now, tz) < start) continue;
+    let a = Math.abs(parseAmount(p.amount)) || 0;
+    if (p.refund) a = -a;
+    if (hint && String(p.card || "").toLowerCase().includes(hint)) parents += a;
+    else mine += a;
+  }
+  const mineLimit = Number(snap.mineLimit) || 0;
+  const parentsLimit = Number(snap.parentsLimit) || 0;
+  const mineLeft = r2(mineLimit - mine);
+  const parentsLeft = r2(parentsLimit - parents);
+  const left = r2(mineLeft + parentsLeft);
+  const daysLeftInWeek = diffDays(t, end) + 1;
+  let status = "good";
+  if (mineLeft < 0 || parentsLeft < 0) status = "over";
+  else if (daysLeftInWeek > 1 && left < ((mineLimit + parentsLimit) * daysLeftInWeek) / 7 / 2) status = "tight";
+  const text = status === "over"
+    ? `Over this week${mineLeft < 0 ? ` by ${money(-mineLeft, cur)} on your card` : ""}${parentsLeft < 0 ? `${mineLeft < 0 ? " and" : ""} by ${money(-parentsLeft, cur)} on your parents' card` : ""}.`
+    : `${money(mineLeft, cur)} left this week on your card${parentsLimit > 0 ? `, ${money(parentsLeft, cur)} on your parents'` : ""}.`;
+  return { ok: true, mode: "week", status, left, mineLeft, parentsLeft, mineLimit, parentsLimit, daysLeftInWeek, weekEnd: end, daily: null, daysLeft: daysLeftInWeek, streak: snap.streak || 0, pending: (data.pending || []).length, cur, updated: snap.savedAt, text };
 }

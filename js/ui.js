@@ -1,7 +1,7 @@
 // Small DOM helpers: escaping, money formatting, bottom sheets, toasts, icons.
 import { get } from "./store.js";
 import { ic } from "./icons.js";
-import { DEFAULT_CATS, compute } from "./engine.js";
+import { DEFAULT_CATS, compute, weekly, isWeekly } from "./engine.js";
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -30,6 +30,13 @@ export function costFrame(amount, st = get()) {
   const a = Math.abs(Number(amount) || 0);
   if (!a) return "";
   if (set.payType === "hourly" && Number(set.wage) > 0) return hoursText(a / Number(set.wage));
+  if (isWeekly(st)) {
+    const wk = weekly(st);
+    if (wk.limit > 0) {
+      const f = a / wk.limit;
+      return f < 1 ? `${Math.max(1, Math.round(f * 100))}% of your week` : `${f < 10 ? String(Math.round(f * 10) / 10) : Math.round(f)} weeks of budget`;
+    }
+  }
   const daily = compute(st).dailyBase;
   if (!(daily > 0)) return "";
   const d = a / daily;
@@ -157,3 +164,9 @@ export function nudge(kind, name, title, desc, buttons = "") {
 }
 
 export const emptyState = (name, html) => `<div class="card empty"><span class="empty-ic">${ic(name, { size: 26, stroke: 1.5 })}</span><div>${html}</div></div>`;
+
+
+// "Paid with" switch: your own card or your parents' card (only shown once a parents' weekly budget exists).
+export const hasParentsCard = (st = get()) => Number(st.settings.weekly?.parents) > 0;
+export const walletToggle = (wallet) =>
+  `<div class="kind-toggle two-way" role="tablist" aria-label="Paid with"><button type="button" data-wallet="mine" class="${wallet !== "parents" ? "on" : ""}">${ic("credit-card", { size: 16 })}My card</button><button type="button" data-wallet="parents" class="${wallet === "parents" ? "on" : ""}">${ic("users", { size: 16 })}Parents' card</button></div>`;

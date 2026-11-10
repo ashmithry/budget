@@ -421,3 +421,12 @@ input, textarea, select { -webkit-user-select: text; user-select: text; }
 .steps .code { margin: 6px 0 0; }
 .fact-btn { color: var(--ink2); font-size: 14px; text-align: left; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
 .fact-btn b { color: var(--ink); }
+
+.kind-toggle.two-way { grid-template-columns: 1fr 1fr; }
+.kind-toggle button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.wk-rows { display: grid; gap: 10px; margin: 2px 0 2px; }
+.wk-row .row { font-size: 14.5px; }
+.wk-row .row b { font-weight: 650; }
+.wk-row .gauge { height: 10px; margin-top: 5px; }
+.wk-row.parents .gauge i { background-color: #55589c; }
+.hero.over .wk-row .gauge i.over { background-color: var(--seal); }

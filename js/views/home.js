@@ -1,7 +1,7 @@
 import { get, put, setSettings } from "../store.js";
 import { today, addDays, pretty, prettyIn, weekday } from "../dates.js";
-import { compute, categoryStats, categories, categoryMonth, catById, noSpendStreak, resisted, live, needsWorthCheck, weekReview, billsBetween, MOODS, round2 } from "../engine.js";
-import { esc, money, icon, plural, sheet, toast, haptic, tile, catTile, catLook, chip, nudge, emptyState, ic, costFrame } from "../ui.js";
+import { compute, weekly, isWeekly, categoryStats, categories, categoryMonth, catById, noSpendStreak, resisted, live, needsWorthCheck, weekReview, billsBetween, MOODS, round2 } from "../engine.js";
+import { esc, money, icon, plural, sheet, toast, haptic, tile, catTile, catLook, chip, nudge, emptyState, ic, costFrame, hasParentsCard, walletToggle } from "../ui.js";
 import { openAdd, openAfford, skipItem, formSheet } from "../sheets.js";
 import { openAsk } from "./ask.js";
 import { openCooldown } from "../cooldown.js";
@@ -21,6 +21,7 @@ function txRow(tx) {
   const tileHTML = tx.kind === "income" ? tile("banknote", "#2e6a47") : tx.kind === "save" ? tile("piggy-bank", "#55589c") : tx.kind === "unsave" ? tile("lock-open", "#2e6a47") : tx.kind === "adjust" ? tile("scale", "#56625b") : catTile(c);
   const mood = tx.mood ? MOODS.find((m) => m.id === tx.mood) : null;
   const tags = [
+    tx.wallet === "parents" ? `<span class="tag">parents' card</span>` : "",
     tx.source === "applepay" ? `<span class="tag brand">Apple Pay</span>` : tx.source === "shortcut" ? `<span class="tag brand">Shortcut</span>` : "",
     tx.source === "bill" ? `<span class="tag">auto</span>` : "",
     tx.review ? `<span class="tag warn">check</span>` : "",
@@ -52,6 +53,11 @@ function nudges(c) {
   }
   // 3. state-of-the-day coaching
   if (c.status === "short") out.push(nudge("bad", "triangle-alert", `You're ${money(-c.pool)} short ${c.scheduled ? `until ${pretty(addDays(c.end, 1))}` : `for bills before ${pretty(c.end)}`}`, "Bills coming up need more than you have. Pause anything optional and check whether a bill can move. If the number looks wrong, match your bank balance.", `<button class="btn sm ghost" data-act="balance">Match my bank</button>`));
+  else if (isWeekly(st)) {
+    const wk = weekly(st);
+    for (const [w, label] of [["mine", "your card"], ["parents", "your parents' card"]]) if (wk[w].limit > 0 && wk[w].left < 0) out.push(nudge("bad", "trending-down", `${money(-wk[w].left)} over this week on ${label}`, `It resets ${pretty(addDays(wk.end, 1))}. Until then, anything else on ${label} makes next week start in the hole. A no-spend day or two fixes it.`));
+    if (!wk.lastsToEnd) out.push(nudge("warn", "gauge", `${money(wk.mine.limit, { cents: false })}/week runs out before ${pretty(c.end)}`, `Your money supports about ${money(wk.affordableWeekly, { cents: false })}/week until then. Lower your weekly amount or pick a closer end date.`, `<button class="btn sm primary" data-act="weekly">Adjust</button>`));
+  }
   else if (c.status === "over") out.push(nudge("bad", "trending-down", `Over today's limit by ${money(-c.leftToday)}`, `It's spread across the rest of the week: every day until ${pretty(c.end)} is now ${money(c.tomorrowDaily ?? 0)}. A no-spend day tomorrow gets you back on track.`));
   // 4. waitlist items ready to decide
   const ready = live(st.wish).filter((w) => w.status === "waiting" && w.unlockAt <= Date.now());
@@ -86,7 +92,8 @@ function nudges(c) {
     out.push(nudge("warn", catLook(h).icon, `${esc(h.name)}: ${h.state === "over" ? `${money(h.spent - h.limit)} over this month` : `${money(h.spent)} of ${money(h.limit)} already`}`, h.state === "over" ? "Anything more here comes out of your other plans." : `On pace for ${money(h.projected)} by month end. Go easy on this one for a few days.`));
   }
   // 9. setup prompts
-  if (!c.scheduled && c.endExpired) out.push(nudge("warn", "calendar-plus", `Your end date (${pretty(st.settings.lastUntil)}) has passed`, "Until you pick a new one, your money is spread over the next 30 days. Nothing is assumed to come in.", `<a class="btn sm primary" href="#/plan/income">Pick a new end date</a>`));
+  if (!isWeekly(st) && !st.settings.hideWeeklyTip) out.push(nudge("info", "calendar-days", "Budget by the week instead?", "Set one weekly amount for your own card, and a separate one if you also use a parents' card. Parents' card spending never comes out of your balance.", `<button class="btn sm primary" data-act="weekly">Set weekly budget</button><button class="btn sm ghost" data-act="hide-weekly">No thanks</button>`));
+    if (!c.scheduled && c.endExpired) out.push(nudge("warn", "calendar-plus", `Your end date (${pretty(st.settings.lastUntil)}) has passed`, "Until you pick a new one, your money is spread over the next 30 days. Nothing is assumed to come in.", `<a class="btn sm primary" href="#/plan/income">Pick a new end date</a>`));
   else if (!c.scheduled && !c.endSet) out.push(nudge("info", "calendar-plus", "How long does this money need to last?", `Right now it's spread over the next 30 days. If nothing steady is coming in (contract or gig pay, or no job right now), pick your own end date, like the end of the semester. Contract pay only counts once it lands.`, `<a class="btn sm primary" href="#/plan/income">Set my end date</a>`));
   else if (c.endSet && c.daysLeft <= 3) out.push(nudge("info", "calendar-plus", `Your plan ends ${prettyIn(c.end)}`, "Whatever's left is spread over the days until then. If you need this money to last longer, pick your next end date now.", `<a class="btn sm ghost" href="#/plan/income">Change end date</a>`));
   if (!st.meta.key && !st.settings.hideAutoTip) out.push(nudge("info", "credit-card", "Log purchases automatically", "Every Apple Pay tap can log itself, and a widget can show today's number on your home and lock screen.", `<a class="btn sm primary" href="#/automate">Set it up</a><button class="btn sm ghost" data-act="hide-auto">Later</button>`));
@@ -118,7 +125,7 @@ export function renderHome() {
     <div><h1>${greeting()}</h1><div class="sub">${pretty(t, { full: true })}</div></div>
     <div class="row" style="gap:8px"><button class="icon-btn" data-act="ask" aria-label="Ask Claude about your budget">${ic("message-circle", { size: 19 })}</button><a class="icon-btn" href="#/automate" aria-label="Automations and widgets">${icon("bolt")}</a><a class="icon-btn" href="#/settings" aria-label="Settings">${icon("gear")}</a></div>
   </header>
-  <section class="hero ${c.status}" aria-live="polite">
+  ${isWeekly(st) ? weeklyHero(st, c) : `  <section class="hero ${c.status}" aria-live="polite">
     <div class="hero-top"><span class="label">${c.status === "short" ? (c.scheduled ? "Short before payday" : "Short for upcoming bills") : c.status === "over" ? "Over today's limit" : "Safe to spend today"}</span><span class="days">${daysTxt}</span></div>
     <div class="big num">${big < 0 ? "−" : ""}<small>${esc(cur.replace("−", ""))}</small>${esc(num)}</div>
     <div class="gauge" role="img" aria-label="${c.status === "over" || c.status === "short" ? "Over the limit" : `${pct}% of today's money left`}"><i style="width:${pct}%"></i></div>
@@ -128,13 +135,13 @@ export function renderHome() {
       ${c.upcomingTotal > 0 ? `<span><b class="num">${money(c.upcomingTotal, { cents: false })}</b> in bills set aside</span>` : ""}
       <button class="fact-btn" data-act="limit">${c.cap ? `Your limit <b class="num">${money(c.cap)}</b>/day${c.capped ? ` (math allows ${money(c.rawDaily)})` : ""}` : "Set a daily limit"}</button>
     </div>
-  </section>
+  </section>`}
   <div class="actions">
     <button class="btn" data-act="afford">${ic("circle-help", { size: 19 })}Can I afford it?</button>
     <button class="btn primary" data-act="add">${ic("plus", { size: 19, stroke: 2.25 })}Log spending</button>
   </div>
   <div class="stats">
-    <a class="stat" href="#/activity"><b class="num">${money(c.spentToday)}</b><span>spent today</span></a>
+    ${isWeekly(st) ? `<a class="stat" href="#/activity"><b class="num">${money(weekly(st).spent)}</b><span>spent this week</span></a>` : `<a class="stat" href="#/activity"><b class="num">${money(c.spentToday)}</b><span>spent today</span></a>`}
     <a class="stat" href="#/wait"><b class="num">${waiting.length ? waiting.length : money(res.total, { cents: false })}</b><span>${waiting.length ? "on your waitlist" : "not spent by skipping"}</span></a>
     <a class="stat" href="#/insights"><b class="num">${plural(streak, "day")}</b><span>no-spend streak</span></a>
   </div>
@@ -168,6 +175,8 @@ export const homeActions = {
   balance: () => import("../sheets.js").then((m) => m.openBalanceCheck()),
   ask: () => openAsk(),
   limit: () => openLimit(),
+  weekly: () => openWeekly(),
+  "hide-weekly": () => setSettings({ hideWeeklyTip: true }),
   "cd-open": (el) => openCooldown(el.dataset.id),
   "hide-waste": () => setSettings({ hideWaste: today() }),
 };
@@ -182,6 +191,7 @@ export function openReview() {
     return `<h3>Check purchases <span class="tag">${items.length} left</span><button data-close>Done</button></h3>
       <div class="card" style="text-align:center"><div class="amount-display num" style="font-size:44px">${money(tx.amount)}</div>
       <div style="font-weight:650">${esc(tx.note || "Unknown merchant")}</div><div class="small muted">${pretty(tx.date)}${tx.card ? `, ${esc(tx.card)}` : ""}</div></div>
+      ${hasParentsCard() ? walletToggle(tx.wallet) : ""}
       <div class="small muted" style="margin:0 4px 8px">Category</div>
       <div class="chips" style="margin-bottom:14px">${cats.map((c) => chip(catLook(c).icon, c.name, tx.cat === c.id, `data-cat="${c.id}"`, catLook(c).color)).join("")}</div>
       <div class="small muted" style="margin:0 4px 8px">Why? (optional)</div>
@@ -193,6 +203,7 @@ export function openReview() {
     const tx = live(s().tx).filter((x) => x.review).sort((a, b) => (a.ts || 0) - (b.ts || 0))[0];
     if (!tx) return;
     el.querySelectorAll("[data-cat]").forEach((b) => (b.onclick = () => { put("tx", { id: tx.id, cat: b.dataset.cat }); sh.render(); }));
+    el.querySelectorAll("[data-wallet]").forEach((b) => (b.onclick = () => { put("tx", { id: tx.id, wallet: b.dataset.wallet === "parents" ? "parents" : undefined }); sh.render(); }));
     el.querySelectorAll("[data-mood]").forEach((b) => (b.onclick = () => { put("tx", { id: tx.id, mood: tx.mood === b.dataset.mood ? null : b.dataset.mood }); sh.render(); }));
     el.querySelector("[data-ok]").onclick = () => { put("tx", { id: tx.id, review: false }); haptic(); sh.render(); };
     el.querySelector("[data-del]").onclick = () => { put("tx", { id: tx.id, deleted: true }); sh.render(); };
@@ -222,6 +233,57 @@ export function openLimit() {
       const cap = Number(v.dailyCap) || 0;
       setSettings({ dailyCap: cap > 0 ? cap : null });
       toast(cap > 0 ? `Limit set: ${money(cap)} a day.` : "No daily limit.");
+    },
+  });
+}
+
+// Weekly mode: what's left this week on each card, and whether your own money lasts at that pace.
+function weeklyHero(st, c) {
+  const wk = weekly(st);
+  const big = wk.left;
+  const amt = money(Math.abs(big));
+  const cur = amt.match(/^[^\d]+/)?.[0] || "";
+  const num = amt.replace(/^[^\d]+/, "");
+  const bar = (w, label, cls) => {
+    const pct = w.limit > 0 ? Math.max(0, Math.min(100, (w.left / w.limit) * 100)) : 0;
+    return `<div class="wk-row ${cls}"><div class="row between"><span>${label}</span><span class="num"><b>${money(w.left)}</b> of ${money(w.limit, { cents: false })}</span></div><div class="gauge" role="img" aria-label="${label}: ${money(w.left)} left of ${money(w.limit)}"><i class="${w.left < 0 ? "over" : ""}" style="width:${w.left < 0 ? 100 : pct}%"></i></div></div>`;
+  };
+  const resets = pretty(addDays(wk.end, 1));
+  return `<section class="hero ${wk.status}" aria-live="polite">
+    <div class="hero-top"><span class="label">${wk.status === "over" ? "Over budget this week" : "Left this week"}</span><span class="days">${wk.daysLeftInWeek === 1 ? "Resets tomorrow" : `${wk.daysLeftInWeek} days left`}</span></div>
+    <div class="big num">${big < 0 ? "−" : ""}<small>${esc(cur.replace("−", ""))}</small>${esc(num)}</div>
+    <div class="wk-rows">${bar(wk.mine, "My card", "mine")}${wk.parents.limit > 0 ? bar(wk.parents, "Parents' card", "parents") : ""}</div>
+    <div class="facts">
+      <span>Resets ${resets}</span>
+      ${wk.runsOut ? `<span>${wk.lastsToEnd ? `At ${money(wk.mine.limit, { cents: false })}/week your ${money(Math.max(c.pool, 0), { cents: false })} lasts past ${pretty(c.end).replace(/^\w+, /, "")}` : `<b class="over">At ${money(wk.mine.limit, { cents: false })}/week your money runs out ${pretty(wk.runsOut).replace(/^\w+, /, "")}</b>, before ${pretty(c.end).replace(/^\w+, /, "")}. Max that lasts: ${money(wk.affordableWeekly, { cents: false })}/week`}</span>` : ""}
+      <button class="fact-btn" data-act="weekly">Change weekly budget</button>
+    </div>
+  </section>`;
+}
+
+// Set up weekly budgets: how much per week on your own card and on your parents' card.
+export function openWeekly() {
+  const st = get();
+  const wk = weekly(st);
+  const lim = st.settings.weekly || {};
+  formSheet({
+    title: "Weekly budget",
+    note: `Spend by the week instead of the day. Your own money supports up to <b>${money(wk.affordableWeekly, { cents: false })}/week</b> through ${pretty(wk.periodEnd, { full: true })}. Parents' card spending has its own weekly limit and never comes out of your balance.`,
+    value: { period: st.settings.period || "week", mine: lim.mine ?? "", parents: lim.parents ?? "", weekStartDow: String(st.settings.weekStartDow ?? 1), parentsCard: st.settings.parentsCard || "" },
+    fields: [
+      { key: "period", label: "Budget by", type: "select", options: [["week", "Week"], ["day", "Day"]] },
+      { key: "mine", label: "My card, per week", type: "money", required: true, placeholder: "40", show: (v) => v.period === "week" },
+      { key: "parents", label: "Parents' card, per week", type: "money", placeholder: "20", help: "Leave empty if you don't use a parents' card.", show: (v) => v.period === "week" },
+      { key: "parentsCard", label: "Parents' card name in Apple Wallet (optional)", placeholder: "e.g. Amex, Dad", help: "Apple Pay taps on a card whose name contains this count toward the parents' card.", show: (v) => v.period === "week" },
+      { key: "weekStartDow", label: "Week starts on", type: "select", options: [["1", "Monday"], ["0", "Sunday"]], show: (v) => v.period === "week" },
+    ],
+    saveLabel: "Save",
+    onSave: (v) => {
+      if (v.period === "day") { setSettings({ period: "day" }); toast("Back to a daily budget."); return; }
+      const mine = Number(v.mine) || 0;
+      if (!(mine > 0)) { toast("Add a weekly amount for your card"); return false; }
+      setSettings({ period: "week", weekly: { mine, parents: Number(v.parents) || 0 }, weekStartDow: Number(v.weekStartDow), parentsCard: String(v.parentsCard || "").trim() });
+      toast(`Weekly budget: ${money(mine)} on your card${Number(v.parents) > 0 ? ` + ${money(Number(v.parents))} on your parents'` : ""}.`);
     },
   });
 }

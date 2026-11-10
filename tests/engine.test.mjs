@@ -243,3 +243,36 @@ test("daily cap: lower than the math wins, extra stays unspent; imported history
   assert.equal(st.total, 14);
   assert.deepEqual(st.top, ["Boba Guys", 2]);
 });
+
+test("weekly budgets split by card; parents' card never touches your balance", async () => {
+  const { weekly, weekStartOf } = await import("../js/engine.js");
+  const t = "2026-11-12"; // a Thursday
+  assert.equal(weekStartOf(t, 1), "2026-11-09");
+  const s = base(t, { settings: { period: "week", weekly: { mine: 40, parents: 20 }, lastUntil: "2026-12-19", buffer: 20, anchor: { amount: 500, date: "2026-11-01", ts: 0 } } });
+  s.tx.push({ id: "a", kind: "expense", amount: 12, cat: "coffee", date: "2026-11-10", ts: 2 });
+  s.tx.push({ id: "b", kind: "expense", amount: 8, cat: "food", date: "2026-11-11", ts: 3, wallet: "parents" });
+  s.tx.push({ id: "c", kind: "expense", amount: 30, cat: "food", date: "2026-11-08", ts: 1 }); // last week
+  const w = weekly(s, t);
+  assert.deepEqual(w.mine, { limit: 40, spent: 12, left: 28 });
+  assert.deepEqual(w.parents, { limit: 20, spent: 8, left: 12 });
+  assert.equal(w.left, 40);
+  assert.equal(w.daysLeftInWeek, 4);
+  assert.equal(compute(s, t).cash, 500 - 12 - 30); // parents' $8 not deducted
+  const r = impact(s, 15, "food", t, "parents");
+  assert.equal(r.week.leftAfter, -3);
+  assert.equal(r.verdict, "no");
+  assert.equal(impact(s, 10, "food", t, "mine").verdict, "fits");
+});
+
+test("widget in weekly mode: per-card left, parents' taps matched by card name, new week resets", () => {
+  const snap = { v: 1, day: "2026-11-12", tz: 0, cur: "$", mode: "week", weekStart: "2026-11-09", weekEnd: "2026-11-15", mineLimit: 40, mineSpent: 12, parentsLimit: 20, parentsSpent: 8, parentsHint: "amex", periodEnd: "2026-12-19", daysLeft: 38, dailyBase: 12, spentToday: 0, pool: 480 };
+  const noon = Date.parse("2026-11-12T12:00:00Z");
+  let w = widgetNumbers({ snapshot: snap, pending: [{ amount: "$5", at: noon, card: "Chase Debit" }, { amount: "$6", at: noon, card: "Dad's AMEX" }] }, noon);
+  assert.equal(w.mineLeft, 23);
+  assert.equal(w.parentsLeft, 6);
+  assert.equal(w.left, 29);
+  w = widgetNumbers({ snapshot: snap, pending: [] }, Date.parse("2026-11-17T12:00:00Z"));
+  assert.equal(w.mineLeft, 40);
+  assert.equal(w.parentsLeft, 20);
+  assert.equal(w.daysLeftInWeek, 6);
+});
