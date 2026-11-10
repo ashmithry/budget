@@ -100,6 +100,8 @@ export function widgetNumbers(data, now = Date.now()) {
     spent = pendToday;
     base = 0;
   }
+  const cap = Number(snap.cap) || 0;
+  if (cap > 0) base = Math.min(base, cap);
   const left = Math.round((base - spent) * 100) / 100;
   const r2 = (n) => Math.round(n * 100) / 100;
   let status = "good";
@@ -108,7 +110,7 @@ export function widgetNumbers(data, now = Date.now()) {
   else if (left < 0) status = "over";
   else if (base > 0 && left < base * 0.3) status = "tight";
   const endDow = DOW[new Date(snap.periodEnd + "T12:00:00Z").getUTCDay()];
-  const tomorrow = daysLeft > 1 ? r2(Math.max(pool, 0) / (daysLeft - 1)) : null;
+  const tomorrow = daysLeft > 1 ? r2(Math.min(Math.max(pool, 0) / (daysLeft - 1), cap > 0 ? cap : Infinity)) : null;
   let text;
   if (stale) text = "New pay period. Open the app to refresh.";
   else if (status === "short") text = `You're ${money(-pool, cur)} short until payday. Hold off on extras.`;

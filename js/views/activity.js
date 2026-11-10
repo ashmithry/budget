@@ -63,7 +63,7 @@ export function renderActivity() {
   const nextMonth = addDays(mEnd, 1);
   return `
   <header class="top"><div><h1>Activity</h1><div class="sub">${money(monthSpent)} spent${monthIn ? `, ${money(monthIn)} came in` : ""} in ${monthName(month)}</div></div>
-    <button class="icon-btn" data-act="income" aria-label="Add money in">${ic("banknote", { size: 19 })}</button></header>
+    <div class="row" style="gap:8px"><button class="icon-btn" data-act="import" aria-label="Import past purchases">${ic("clipboard-paste", { size: 19 })}</button><button class="icon-btn" data-act="income" aria-label="Add money in">${ic("banknote", { size: 19 })}</button></div></header>
   <div class="card">
     <div class="row between" style="margin-bottom:10px">
       <button class="btn sm ghost" data-act="month" data-m="${prevMonth}" aria-label="Previous month">${ic("chevron-left", { size: 20 })}</button>

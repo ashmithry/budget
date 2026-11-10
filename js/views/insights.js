@@ -1,7 +1,9 @@
-import { get, commit } from "../store.js";
-import { ai, AIError } from "../ai.js";
+import { get, commit, put } from "../store.js";
+import { ai, AIError, spendingSummary } from "../ai.js";
+import { openImport } from "./importer.js";
+import { openAsk } from "./ask.js";
 import { today, addDays, diffDays, monthStart, dayOfMonth, dowName } from "../dates.js";
-import { live, categoryMonth, leaks, moodStats, regretStats, weekdayStats, lateNight, resisted, noSpendStreak, underStreak, weekReview, txIn, isFlex, catById, MOODS, round2, recurringMonthly } from "../engine.js";
+import { live, categoryMonth, leaks, moodStats, regretStats, weekdayStats, lateNight, resisted, noSpendStreak, underStreak, weekReview, txIn, isFlex, catById, MOODS, round2, recurringMonthly, uid } from "../engine.js";
 import { esc, money, plural, costFrame, ic, catTile, emptyState, toast, nudge } from "../ui.js";
 
 const s = () => get();
@@ -44,7 +46,39 @@ function checkinCard(st) {
   return nudge("info", "chart-line", "Weekly check-in from Claude", "A short read on what drove the last 7 days of spending, and one thing to try. Only your weekly totals are sent.", `<button class="btn sm primary" data-act="checkin">Get my check-in</button>`);
 }
 
+function roastCard(st) {
+  const r = st.meta.roast;
+  const fresh = r && r.day === today();
+  const head = `<div class="section-title"><span>Reality check</span><span class="tiny faint">from Claude, last 30 days</span></div>`;
+  if (fresh) return `${head}<div class="card roast"><div class="t">${esc(r.headline)}</div><ul>${r.receipts.map((x) => `<li>${esc(x)}</li>`).join("")}</ul><div class="could"><b>Could have been:</b> ${esc(r.couldHaveBeen)}</div><div class="rule"><b>Rule that would have saved the most:</b> ${esc(r.rule)}</div>
+    <div class="btns" style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn sm primary" data-act="roast-rule">Add that rule</button><button class="btn sm ghost" data-act="ask">Ask a follow-up</button></div></div>`;
+  return `${head}${nudge("bad", "eye", "See exactly what you spent and wasted", "Claude goes through your last 30 days: your worst habits with exact numbers, what that money could have been, and the one rule that would have saved the most.", `<button class="btn sm primary" data-act="roast">Give me a reality check</button>`)}`;
+}
+
 export const insightsActions = {
+  roast: async (el) => {
+    el.disabled = true;
+    el.textContent = "Going through your receipts…";
+    try {
+      const st = get();
+      const r = await ai("roast", { summary: spendingSummary(st, 30), days: 30 });
+      if (!r.ok) throw new AIError("Not enough spending logged yet. Import your last month first.");
+      st.meta.roast = { day: today(), ...r.roast };
+      commit({ sync: false });
+    } catch (e) {
+      el.disabled = false;
+      el.textContent = "Give me a reality check";
+      toast(e instanceof AIError ? e.message : "Claude couldn't do that right now. Try again.");
+    }
+  },
+  "roast-rule": () => {
+    const r = get().meta.roast;
+    if (!r?.rule) return;
+    put("rules", { id: uid(), text: r.rule.slice(0, 120), cat: null });
+    toast("Added to your rules. It shows up when you check a purchase.");
+  },
+  import: () => openImport(),
+  ask: () => openAsk(),
   checkin: async (el) => {
     el.disabled = true;
     el.textContent = "Reading your week…";
@@ -104,6 +138,8 @@ export function renderInsights() {
     <div class="stat"><b class="num">${plural(noSpendStreak(st), "day")}</b><span>no-spend streak</span><span class="tiny faint" style="display:block">${plural(underStreak(st), "day")} under limit</span></div>
     <div class="stat"><b class="num good">${money(res.total, { cents: false })}</b><span>not spent by skipping</span></div>
   </div>
+  <div class="actions" style="margin-top:4px"><button class="btn" data-act="import">${ic("clipboard-paste", { size: 18 })}Import history</button><button class="btn" data-act="ask">${ic("message-circle", { size: 18 })}Ask Claude</button></div>
+  ${hasData ? roastCard(st) : ""}
   ${hasData ? checkinCard(st) : ""}
   ${tips.length ? `<div class="section-title"><span>Suggestions</span></div><div class="card tips">${tips.map(([n, x]) => `<div class="tip">${ic(n, { size: 18 })}<div>${x}</div></div>`).join("")}</div>` : ""}
   ${wk.tracked || wk.spent ? `<div class="section-title"><span>Last 7 days</span></div><div class="card">

@@ -36,6 +36,7 @@ export function renderSettings() {
     <button class="item" data-act="why">${tile("book-marked", "#55589c")}<div class="main"><div class="name">How this app fights overspending</div><div class="meta">The research behind each feature</div></div></button>
   </div>
   <div class="list">
+    <button class="item" data-act="import">${tile("clipboard-paste", "#2e6a47")}<div class="main"><div class="name">Import past purchases</div><div class="meta">Paste from your bank app; Claude reads it</div></div></button>
     <button class="item" data-act="export">${tile("upload", "#2f6690")}<div class="main"><div class="name">Export backup (JSON)</div></div></button>
     <label class="item" style="cursor:pointer">${tile("download", "#2f6690")}<div class="main"><div class="name">Import backup</div><div class="meta">Merges with what's here</div></div><input type="file" accept="application/json,.json" id="import" hidden></label>
     <button class="item" data-act="reset">${tile("trash-2", "#b3312a")}<div class="main"><div class="name over">Erase everything on this device</div></div></button>
@@ -128,6 +129,35 @@ function openWhy() {
 
 /* ---------- Automate ---------- */
 let tokenCache = null;
+const isIPhoneSafari = () => /iphone|ipad|ipod/i.test(navigator.userAgent) && !(matchMedia("(display-mode: standalone)").matches || navigator.standalone === true);
+const ago = (ms) => {
+  if (!ms) return "never";
+  const m = Math.round((Date.now() - ms) / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  return h < 24 ? `${h} hr ago` : new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" });
+};
+async function refreshLinkStatus(root) {
+  const box = root.querySelector("#linkstatus");
+  if (!box || !tokenCache) return;
+  try {
+    const r = await (await fetch(`${ORIGIN}/api/status?t=${tokenCache}`, { cache: "no-store" })).json();
+    if (!r.ok) {
+      box.className = "status-box bad";
+      box.innerHTML = `<b>Link not connected.</b> <span class="small">Tap Sync now above, then copy the link again.</span>`;
+      return;
+    }
+    const tested = !!r.lastTestAt;
+    const tapped = !!r.lastLogAt;
+    box.className = `status-box ${tapped || tested ? "ok" : "warn"}`;
+    box.innerHTML = `<div class="row between"><b>${tapped ? "Working" : tested ? "Connected, waiting for your first tap" : "Set up but not tested yet"}</b><button class="btn sm ghost" data-act="link-refresh">Refresh</button></div>
+      <div class="small">Last Apple Pay tap received: <b>${ago(r.lastLogAt)}</b></div>
+      <div class="small">Last test run: <b>${ago(r.lastTestAt)}</b>${tested ? "" : " (do step 8)"}</div>`;
+  } catch {
+    box.innerHTML = `<span class="small muted">Couldn't check your link (offline?).</span>`;
+  }
+}
 export function renderAutomate() {
   const st = s();
   const on = !!st.meta.key;
@@ -146,19 +176,21 @@ export function renderAutomate() {
     </div></div>
   </div>
   ${on ? `
+  ${isIPhoneSafari() ? `<div class="card nudge-card bad"><div class="nudge"><span class="nic">${ic("triangle-alert", { size: 18 })}</span><div class="grow"><div class="t">You're in Safari, not the app</div><div class="d">Safari and the Home Screen app keep separate copies of your budget. Open the app from your Home Screen icon and set this up there, or taps will log into a budget you never see.</div></div></div></div>` : ""}
   <details class="card" open><summary><span class="sum-l">${tile("credit-card", "#2e6a47")}Log every Apple Pay tap automatically</span></summary>
-    <p class="small muted" style="margin-top:0">iPhone with iOS 17 or later. Each time you tap to pay, the amount and store are sent here. Next time you open the app they're filed under the right category (it learns from you).</p>
+    <div class="status-box" id="linkstatus"><span class="muted small">Checking your link…</span></div>
+    <p class="small muted">iPhone, iOS 17 or later. Works for Apple Pay / Wallet taps in stores (not online checkouts or card swipes). Takes about 2 minutes, once.</p>
     <ol class="steps">
-      <li>Open <b>Shortcuts</b> › <b>Automation</b> tab › <b>+</b> › <b>Transaction</b>.</li>
-      <li>Pick your cards, choose <b>Run Immediately</b>, turn off <b>Notify When Run</b>, tap <b>Next</b> › <b>New Blank Automation</b>.</li>
-      <li>Add the action <b>Get Contents of URL</b> and paste this link:</li>
+      <li><b>Copy your link</b>:${urlBox(logUrl)}</li>
+      <li>Open <b>Shortcuts</b> › <b>Automation</b> (bottom) › <b>+</b> › <b>Transaction</b>. Under Card, select all your cards. Choose <b>Run Immediately</b> and turn <b>Notify When Run</b> off. Tap <b>Next</b> › <b>Create New Shortcut</b> (or New Blank Automation).</li>
+      <li>Search actions for <b>Get Contents of URL</b> and tap it. Tap <b>URL</b> and paste your link.</li>
+      <li>Tap the <b>›</b> on that action. Set <b>Method</b> to <b>POST</b> and <b>Request Body</b> to <b>JSON</b>.</li>
+      <li>Tap <b>Add new field › Text</b>. Key: <code>amount</code>. For the value, tap <b>Select Variable</b>, choose <b>Shortcut Input</b>, then tap the blue Shortcut Input bubble and pick <b>Amount</b>.</li>
+      <li>Add another <b>Text</b> field. Key: <code>merchant</code>, value: <b>Shortcut Input</b> › <b>Merchant</b>.</li>
+      <li>Optional: add <b>Show Notification</b> and put <b>Contents of URL</b> in it. After every tap you'll see what's left today.</li>
+      <li><b>Test it (required):</b> tap the <b>▶</b> play button at the bottom of the editor. iOS asks to <b>Allow</b> connecting to budget.ashmithyaramada.com: tap <b>Always Allow</b>. You should see "Connected to your budget", and the status box above turns green. Skip this and iOS blocks every real tap silently.</li>
     </ol>
-    ${urlBox(logUrl)}
-    <ol class="steps" start="4">
-      <li>Tap the arrow on that action: Method <b>POST</b>, Request Body <b>JSON</b>. Add 3 Text fields:<br><code>amount</code> › tap and pick <b>Shortcut Input › Amount</b><br><code>merchant</code> › <b>Merchant</b><br><code>card</code> › <b>Card</b> (or Name)</li>
-      <li>Optional but powerful: add <b>Show Notification</b> with <b>Contents of URL</b>. After every tap you'll see what's left today.</li>
-    </ol>
-    <p class="tiny faint">Only covers Apple Pay / Wallet taps. Card swipes and online checkouts still need a 3-second manual log, or use the widget below.</p>
+    <p class="tiny faint">Still nothing after a real tap? Check the status box: if "Last tap" never changes, the automation isn't firing (open Shortcuts › Automation and make sure it's on and set to Run Immediately). If it changed but the purchase isn't in the app, pull down to refresh by reopening the app.</p>
   </details>
   <details class="card"><summary><span class="sum-l">${tile("zap", "#a0660f")}One-tap "Log spending" widget</span></summary>
     <p class="small muted" style="margin-top:0">A Shortcuts widget on your home screen (also works with Siri, the Action Button and Back Tap) to log cash or card spending without opening the app.</p>
@@ -168,6 +200,7 @@ export function renderAutomate() {
       <li>Add <b>Ask for Input</b> › Type <b>Text</b>, prompt "Where?"</li>
       <li>Add <b>Get Contents of URL</b> with the link below. Method POST, Body JSON: <code>amount</code> › first Provided Input, <code>merchant</code> › second Provided Input.</li>
       <li>Add <b>Show Notification</b> › <b>Contents of URL</b>.</li>
+      <li>Run it once from Shortcuts and tap <b>Always Allow</b> when iOS asks to connect.</li>
       <li>Long-press your home screen › Edit › Add Widget › <b>Shortcuts</b> › pick <b>Log spend</b>.</li>
     </ol>
     ${urlBox(logUrl)}
@@ -211,6 +244,7 @@ export async function bindAutomate(root, rerender) {
     rerender();
     return;
   }
+  refreshLinkStatus(root);
   const b = root.querySelector("#badge");
   if (b) b.onchange = async () => {
     if (b.checked && "Notification" in window && Notification.permission !== "granted") {
@@ -266,6 +300,7 @@ Script.complete();
 }
 
 export const automateActions = {
+  "link-refresh": () => refreshLinkStatus(document),
   copy: (el) => copy(el.dataset.v),
   "copy-script": async () => copy(scriptText(tokenCache || (await currentToken()))),
   "sync-now": async () => {

@@ -1,9 +1,10 @@
 // Bottom sheets: log spending, edit, "Can I afford it?", and the generic edit form used by Plan.
 import { get, put, remove, commit, setSettings } from "./store.js";
 import { today, addDays, pretty } from "./dates.js";
-import { compute, impact, categories, catById, guessCategory, goalSaved, MOODS, live, round2, normMerchant, uid } from "./engine.js";
+import { compute, impact, categories, catById, guessCategory, goalSaved, MOODS, live, round2, normMerchant, uid, categoryStats } from "./engine.js";
 import { sheet, esc, money, hoursText, costFrame, toast, haptic, confirmSheet, ic, chip, catLook, topSheet } from "./ui.js";
 import { ai, AIError } from "./ai.js";
+import { pauseMinutes, startCooldown } from "./cooldown.js";
 
 const s = () => get();
 
@@ -238,7 +239,9 @@ export function openAdd(prefill = {}) {
     sh.close();
     if (!editing && st.kind === "expense" && !st.refund) {
       const after = compute(s());
-      const msg = after.leftToday >= 0 ? `Logged. ${money(after.leftToday)} left today` : `Logged. ${money(-after.leftToday)} over today`;
+      const cs = categoryStats(s(), tx.cat);
+      const habit = cs.n >= 3 && ["food", "coffee", "shopping", "fun"].includes(tx.cat) ? ` That's ${cs.n} ${catById(s(), tx.cat).name.toLowerCase()} buys in 30 days (${money(cs.total)}).` : "";
+      const msg = (after.leftToday >= 0 ? `Logged. ${money(after.leftToday)} left today.` : `Logged. ${money(-after.leftToday)} over today.`) + habit;
       toast(msg, { label: "Undo", run: () => remove("tx", tx.id) });
       prefill.onDone?.(tx, before, after);
     } else if (!editing && st.kind === "income" && st.tax && taxPct() > 0) {
@@ -280,13 +283,18 @@ export function openAfford(prefill = {}) {
     if (r.goal && r.goal.pct >= 2) lines.push(["target", `Same as <b>${r.goal.pct}%</b> of your ${esc(r.goal.name)} goal`]);
     if (r.poolAfter < 0 && r.pool >= 0) lines.push(["ban", `You'd be <b>${money(-r.poolAfter)}</b> short for bills before ${r.scheduled ? "payday" : pretty(r.end)}`]);
     const cool = Number(s().settings.coolHours) || 48;
+    // Small, everyday buys (food, boba, coffee) get a few-minute cool-down instead of days on the waitlist.
+    const quick = pauseMinutes(st.cat) > 0 || r.price <= 30;
+    if (quick && !st.mins) st.mins = pauseMinutes(st.cat) || 10;
     return `<h3>${st.name ? esc(st.name) : "This purchase"}, ${money(r.price)}<button data-close>Close</button></h3>
       <div class="verdict ${r.verdict}"><div class="head">${ic(headIc, { size: 26, stroke: 2 })}<span>${head}</span></div><ul>${lines.map(([n, t]) => `<li>${ic(n, { size: 18 })}<span>${t}</span></li>`).join("")}</ul></div>
       ${rules.length ? `<div class="card warn"><div class="small" style="font-weight:700;margin-bottom:4px">Your rules</div>${rules.map((x) => `<div>“${esc(x.text)}”</div>`).join("")}</div>` : ""}
       <div class="stack">
-        <button class="btn ${r.verdict === "fits" ? "ghost" : "primary"} block" id="wait">${ic("hourglass", { size: 18 })}Wait ${cool} hours first</button>
+        ${quick ? `<div class="row between" style="margin:2px 2px 0"><span class="small muted">Cool down for</span><div class="chips">${[5, 10, 15, 20].map((m) => `<button type="button" class="chip-btn ${st.mins === m ? "on" : ""}" data-mins="${m}"><span>${m} min</span></button>`).join("")}</div></div>
+        <button class="btn primary block" id="cool">${ic("timer", { size: 18 })}Wait ${st.mins} minutes first</button>` : ""}
+        <button class="btn ${quick || r.verdict === "fits" ? "ghost" : "primary"} block" id="wait">${ic("hourglass", { size: 18 })}Wait ${cool} hours first</button>
         <button class="btn ghost block" id="skip">Skip it, count it as saved</button>
-        <button class="btn ${r.verdict === "fits" ? "primary" : "ghost"} block" id="buy">I'm buying it, log it</button>
+        <button class="btn ${r.verdict === "fits" && !quick ? "primary" : "ghost"} block" id="buy">I'm buying it, log it</button>
       </div>
       <p class="tiny faint" style="text-align:center;margin-top:12px">Most urges fade within a day or two. Waiting is free.</p>`;
   }
@@ -304,6 +312,12 @@ export function openAfford(prefill = {}) {
       el.querySelector("#check").onclick = () => { if (!(parseFloat(st.amt) > 0)) return toast("Enter a price"); st.step = "verdict"; sh.render(); };
     } else {
       const price = round2(parseFloat(st.amt));
+      el.querySelectorAll("[data-mins]").forEach((b) => (b.onclick = () => { st.mins = Number(b.dataset.mins); sh.render(); }));
+      el.querySelector("#cool")?.addEventListener("click", () => {
+        if (prefill.wishId) remove("wish", prefill.wishId); // the cool-down replaces the old waitlist entry
+        sh.close();
+        startCooldown({ name: st.name, price, cat: st.cat || "other", minutes: st.mins });
+      });
       el.querySelector("#wait").onclick = () => {
         const hrs = Number(s().settings.coolHours) || 48;
         put("wish", { id: prefill.wishId || uid(), name: st.name || "Something", price, cat: st.cat, status: "waiting", added: Date.now(), unlockAt: Date.now() + hrs * 3600000 });
@@ -342,7 +356,7 @@ export function formSheet({ title, fields, value = {}, onSave, onDelete, saveLab
     if (f.show && !f.show(v)) return "";
     const lab = `<span>${esc(f.label)}</span>`;
     if (f.type === "money") return `<label class="f">${lab}<div class="in-money" data-cur="${cur}"><input class="in num" data-f="${f.key}" type="text" inputmode="decimal" value="${val === "" ? "" : esc(val)}" placeholder="${esc(f.placeholder || "0")}"></div>${f.help ? `<div class="tiny faint" style="margin:4px 4px 0">${f.help}</div>` : ""}</label>`;
-    if (f.type === "select") return `<label class="f">${lab}<select class="in" data-f="${f.key}">${f.options.map(([k, l]) => `<option value="${esc(k)}" ${String(val) === String(k) ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
+    if (f.type === "select") return `<label class="f">${lab}<select class="in" data-f="${f.key}">${f.options.map(([k, l]) => `<option value="${esc(k)}" ${String(val) === String(k) ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>${f.help ? `<div class="tiny faint" style="margin:4px 4px 0">${f.help}</div>` : ""}</label>`;
     if (f.type === "date") return `<label class="f">${lab}<input class="in" data-f="${f.key}" type="date" value="${esc(val)}">${f.help ? `<div class="tiny faint" style="margin:4px 4px 0">${f.help}</div>` : ""}</label>`;
     if (f.type === "number") return `<label class="f">${lab}<input class="in num" data-f="${f.key}" type="text" inputmode="decimal" value="${esc(val)}" placeholder="${esc(f.placeholder || "")}">${f.help ? `<div class="tiny faint" style="margin:4px 4px 0">${f.help}</div>` : ""}</label>`;
     if (f.type === "toggle") return `<label class="switch"><span>${esc(f.label)}${f.help ? `<div class="tiny faint">${f.help}</div>` : ""}</span><input type="checkbox" data-f="${f.key}" ${val ? "checked" : ""}></label>`;

@@ -5,12 +5,39 @@ import { rpc, validToken, params, parseAmount, widgetNumbers, money, send } from
 
 const CATS = /^[a-z0-9_-]{1,24}$/;
 
+// The amount field first; otherwise any currency-looking number in what the shortcut sent
+// (some setups pass the whole Shortcut Input as text instead of picking Amount).
+function findAmount(p) {
+  const direct = parseAmount(p.amount);
+  if (Number.isFinite(direct) && direct !== 0) return direct;
+  for (const v of [p.amount, p.input, p.text, p.transaction]) {
+    const m = String(v ?? "").match(/[-−]?\s?[$€£]\s?\d[\d,]*(?:\.\d{1,2})?|\d[\d,]*\.\d{2}/);
+    if (m) {
+      const n = parseAmount(m[0].replace("−", "-"));
+      if (Number.isFinite(n) && n !== 0) return n;
+    }
+  }
+  return NaN;
+}
+
 export default async function handler(req, res) {
   const p = params(req);
   const t = String(p.t || p.token || "");
   if (!validToken(t)) return send(res, req, 400, { ok: false, error: "missing or bad token", text: "Not logged: the link is missing your token. Copy it again from the app." });
-  const raw = parseAmount(p.amount);
-  if (!Number.isFinite(raw) || raw === 0 || Math.abs(raw) > 100000) return send(res, req, 400, { ok: false, error: "bad amount", text: `Not logged: couldn't read the amount "${String(p.amount ?? "").slice(0, 20)}".` });
+  // A run with no amount at all (running the shortcut by hand to grant iOS's "Allow to connect" prompt)
+  // is a connection test: nothing is logged.
+  const anyAmount = [p.amount, p.input, p.text, p.transaction].some((x) => String(x ?? "").trim() !== "");
+  if (!anyAmount) {
+    try {
+      const st = await rpc("budget_link_status", { p_token: t, p_mark_test: true });
+      if (!st.ok) return send(res, req, 400, { ok: false, error: "unknown link", text: "Not connected: this link isn't linked to a budget. In the app, go to Automate and copy the link again." });
+      return send(res, req, 200, { ok: true, test: true, text: "Connected to your budget. Apple Pay taps will now log automatically. (Test run: nothing was logged.)" });
+    } catch (e) {
+      return send(res, req, 502, { ok: false, error: e.message, text: "Couldn't reach your budget right now." });
+    }
+  }
+  const raw = findAmount(p);
+  if (!Number.isFinite(raw) || raw === 0 || Math.abs(raw) > 100000) return send(res, req, 400, { ok: false, error: "bad amount", text: `Not logged: couldn't read the amount "${String(p.amount ?? p.input ?? "").slice(0, 30)}". In the shortcut, the amount field should be Shortcut Input › Amount.` });
   const kind = p.kind === "income" ? "income" : "expense";
   const item = {
     amount: Math.round(Math.abs(raw) * 100) / 100,

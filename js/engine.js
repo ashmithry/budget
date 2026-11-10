@@ -49,7 +49,8 @@ const afterAnchor = (tx, anchor) => tx.date > anchor.date || (tx.date === anchor
 export function spendable(state) {
   const anchor = state.settings.anchor || { amount: 0, date: "1970-01-01", ts: 0 };
   let total = Number(anchor.amount) || 0;
-  for (const tx of live(state.tx)) if (afterAnchor(tx, anchor)) total += effect(tx);
+  // Imported history (pasted from your bank) is already reflected in your balance: insights only.
+  for (const tx of live(state.tx)) if (!tx.imported && afterAnchor(tx, anchor)) total += effect(tx);
   return round2(total);
 }
 
@@ -69,7 +70,7 @@ export const isFlex = (tx) => tx.kind === "expense" && tx.source !== "bill";
 
 export function flexOn(state, day) {
   let s = 0;
-  for (const tx of live(state.tx)) if (tx.date === day && isFlex(tx)) s += Number(tx.amount) || 0;
+  for (const tx of live(state.tx)) if (tx.date === day && isFlex(tx) && !tx.imported) s += Number(tx.amount) || 0;
   return round2(s);
 }
 
@@ -135,9 +136,13 @@ export function compute(state, t = today()) {
   const buffer = Number(state.settings.buffer) || 0;
   const pool = round2(cash - upcomingTotal - buffer); // after today's spending
   const spentToday = flexOn(state, t);
-  const dailyBase = round2((pool + spentToday) / daysLeft);
+  // Your own daily limit wins if it's lower than the math. The difference simply stays unspent.
+  const cap = Number(state.settings.dailyCap) || 0;
+  const rawDaily = (pool + spentToday) / daysLeft;
+  const dailyBase = round2(cap > 0 ? Math.min(rawDaily, cap) : rawDaily);
+  const capped = cap > 0 && rawDaily > cap;
   const leftToday = round2(dailyBase - spentToday);
-  const tomorrowDaily = daysLeft > 1 ? round2(pool / (daysLeft - 1)) : null;
+  const tomorrowDaily = daysLeft > 1 ? round2(cap > 0 ? Math.min(pool / (daysLeft - 1), cap) : pool / (daysLeft - 1)) : null;
   let status = "good";
   if (pool < 0) status = "short";
   else if (leftToday < 0) status = "over";
@@ -147,7 +152,7 @@ export function compute(state, t = today()) {
   // endSet: you chose this end date and it's still ahead. endExpired: you chose one and it has passed.
   const endSet = !scheduled && !!activeEndDate(state, t);
   const endExpired = !scheduled && !!state.settings.lastUntil && state.settings.lastUntil < t;
-  return { t, end, daysLeft, cash, upcoming, upcomingTotal, buffer, pool, spentToday, dailyBase, leftToday, tomorrowDaily, status, scheduled, endSet, endExpired };
+  return { t, end, daysLeft, cash, upcoming, upcomingTotal, buffer, pool, spentToday, dailyBase, leftToday, tomorrowDaily, status, scheduled, endSet, endExpired, capped, rawDaily: round2(rawDaily), cap };
 }
 
 // What a purchase would do to the numbers, for the "Can I afford it?" check.
@@ -156,7 +161,8 @@ export function impact(state, price, cat, t = today()) {
   const p = Number(price) || 0;
   const leftAfter = round2(c.leftToday - p);
   const poolAfter = round2(c.pool - p);
-  const dailyAfter = c.daysLeft > 1 ? round2(Math.max(poolAfter, 0) / (c.daysLeft - 1)) : null;
+  const capA = Number(state.settings.dailyCap) || 0;
+  const dailyAfter = c.daysLeft > 1 ? round2(Math.min(Math.max(poolAfter, 0) / (c.daysLeft - 1), capA > 0 ? capA : Infinity)) : null;
   const overToday = Math.max(0, -leftAfter);
   // Hours of work only make sense for hourly pay; everyone gets "days of your budget".
   const wage = state.settings.payType === "hourly" ? Number(state.settings.wage) || 0 : 0;
@@ -477,7 +483,26 @@ export function snapshot(state, t = today()) {
     dailyBase: c.dailyBase,
     spentToday: c.spentToday,
     pool: c.pool,
+    cap: Number(state.settings.dailyCap) || 0,
     streak: noSpendStreak(state, t),
     cur: state.settings.currency || "$",
+  };
+}
+
+
+// How much and how often you've spent in a category recently (imported history included).
+export function categoryStats(state, cat, t = today(), days = 30) {
+  const from = addDays(t, -(days - 1));
+  const txs = txIn(state, from, t, (x) => isFlex(x) && x.cat === cat && Number(x.amount) > 0);
+  const total = round2(txs.reduce((a, x) => a + Number(x.amount), 0));
+  const rated = txs.filter((x) => x.worth);
+  return {
+    n: txs.length,
+    total,
+    avg: txs.length ? round2(total / txs.length) : 0,
+    regretted: rated.filter((x) => x.worth === "no").length,
+    rated: rated.length,
+    late: txs.filter((x) => x.late).length,
+    top: Object.entries(txs.reduce((m, x) => ((m[x.note || "?"] = (m[x.note || "?"] || 0) + 1), m), {})).sort((a, b) => b[1] - a[1])[0] || null,
   };
 }

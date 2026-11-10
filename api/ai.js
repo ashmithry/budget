@@ -10,10 +10,10 @@ const ID = /^[a-z0-9_-]{1,24}$/;
 const MOODS = ["need", "treat", "bored", "stressed", "social", "hungry", "deal"];
 
 // One structured-output call. Opus 5.5 always thinks; effort sets how much.
-async function ask({ system, user, schema, effort = "low" }) {
+async function ask({ system, user, schema, effort = "low", maxTokens = 8000 }) {
   const r = await client.beta.messages.create({
     model: MODEL,
-    max_tokens: 8000,
+    max_tokens: maxTokens,
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
     output_config: { effort, format: { type: "json_schema", schema } },
@@ -102,7 +102,82 @@ async function checkin(p) {
   return { ok: true, checkin: { headline: String(out.headline).slice(0, 120), body: String(out.body).slice(0, 700), tryThis: String(out.tryThis).slice(0, 300) } };
 }
 
-const TASKS = { categorize, parse, checkin };
+const COACH = "You are the money coach inside a budgeting app for a full-time college student who is paid by contracts (irregular income) and is actively trying to break an overspending habit, especially on food delivery, eating out, coffee and boba. You see their real numbers. Be specific: quote their actual amounts, counts, merchants and dates. Be direct and a little blunt, with dry humor; it's fine to make them feel the cost of a habit, but never cruel, never moralizing about their character, no shame about necessities like groceries or rent. Plain sentences, no emoji, no markdown headings. Never invent transactions or numbers that aren't in the data.";
+
+const clip = (v, n) => JSON.stringify(v ?? null).slice(0, n);
+
+// Chat about the budget. The app sends a compact summary of the budget plus recent purchases.
+async function chat(p) {
+  const q = String(p.question || "").slice(0, 600).trim();
+  if (!q) return { ok: false };
+  const history = (Array.isArray(p.history) ? p.history : []).slice(-8).map((m) => `${m.role === "assistant" ? "You" : "Student"}: ${String(m.text || "").slice(0, 800)}`).join("\n");
+  const out = await ask({
+    effort: "medium",
+    system: `${COACH} Answer the student's question using the budget data. Keep it under 120 words unless they ask for detail. When it helps, end with one concrete next step they can do in the app (set a daily limit, start a cool-down timer before buying, add a rule, put something on the waitlist, skip a category for a week). If they ask whether they can afford something, use their safe-to-spend today, daily number and days left, and say what it does to the rest of their days.`,
+    user: `Budget data (JSON):\n${clip(p.context, 24000)}\n\n${history ? `Conversation so far:\n${history}\n\n` : ""}Student: ${q}`,
+    schema: { type: "object", properties: { answer: { type: "string" } }, required: ["answer"], additionalProperties: false },
+  });
+  return { ok: true, answer: String(out.answer || "").slice(0, 2500) };
+}
+
+// Turn pasted bank/card history into transactions (one chunk at a time; the app splits long pastes).
+async function importTx(p) {
+  const cats = cleanCats(p.cats);
+  const text = String(p.text || "").slice(0, 9000).trim();
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(String(p.today)) ? String(p.today) : new Date().toISOString().slice(0, 10);
+  if (!text || !cats.length) return { ok: true, transactions: [] };
+  const out = await ask({
+    maxTokens: 16000,
+    system: "You convert pasted bank or card statement text into transactions for a budgeting app. Each line or row may include a date, a description/merchant, and an amount; formats vary by bank (CSV, copied tables, app screenshots as text). Skip balances, headers, totals, pending holds that also appear posted, and transfers between the person's own accounts or to savings. Money out is 'expense'; money in from work, clients, family or Venmo is 'income'; returns are 'refund'. Clean merchant names (e.g. 'SQ *BOBA GUYS 0423' becomes 'Boba Guys'). Dates are YYYY-MM-DD; if the year is missing, use the most recent past date that fits given today.",
+    user: `Today is ${today}.\nCategories (id: name):\n${cats.map((c) => `${c.id}: ${c.name}`).join("\n")}\n\nStatement text:\n${text}`,
+    schema: {
+      type: "object",
+      properties: {
+        transactions: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { date: { type: "string" }, merchant: { type: "string" }, amount: { type: "number" }, kind: { type: "string", enum: ["expense", "income", "refund"] }, cat: { type: "string", enum: cats.map((c) => c.id) } },
+            required: ["date", "merchant", "amount", "kind", "cat"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["transactions"],
+      additionalProperties: false,
+    },
+  });
+  const ok = (x) => /^\d{4}-\d{2}-\d{2}$/.test(x.date) && x.date <= today && x.amount > 0 && x.amount < 100000;
+  return { ok: true, transactions: (out.transactions || []).filter(ok).slice(0, 400).map((x) => ({ ...x, merchant: String(x.merchant).slice(0, 60) })) };
+}
+
+// The voice on the cool-down screen: one or two lines, specific to this purchase and their history.
+async function nudge(p) {
+  const out = await ask({
+    system: `${COACH} The student is about to buy something and the app has made them wait a few minutes first. Write what a sharp friend who knows their numbers would say right now to talk them out of it, in 1-2 short sentences (max 40 words). Use their numbers for this category. If skipping clearly makes sense, say so plainly.`,
+    user: `About to buy (JSON):\n${clip(p.purchase, 3000)}`,
+    schema: { type: "object", properties: { line: { type: "string" } }, required: ["line"], additionalProperties: false },
+  });
+  return { ok: true, line: String(out.line || "").slice(0, 400) };
+}
+
+// "Reality check": what they actually spent and wasted recently, and what it could have been.
+async function roast(p) {
+  const out = await ask({
+    effort: "medium",
+    system: `${COACH} Write a reality check of their recent spending. Lead with the habit that cost the most. Receipts are short, punchy lines with exact numbers (e.g. "14 boba runs in 30 days: $93, about 8 days of your budget"). "Could have been" turns the avoidable total into concrete things a student would actually want. End with one rule that would have saved the most.`,
+    user: `Their last ${Number(p.days) || 30} days (JSON):\n${clip(p.summary, 16000)}`,
+    schema: {
+      type: "object",
+      properties: { headline: { type: "string" }, receipts: { type: "array", items: { type: "string" } }, couldHaveBeen: { type: "string" }, rule: { type: "string" } },
+      required: ["headline", "receipts", "couldHaveBeen", "rule"],
+      additionalProperties: false,
+    },
+  });
+  return { ok: true, roast: { headline: String(out.headline).slice(0, 140), receipts: (out.receipts || []).slice(0, 5).map((r) => String(r).slice(0, 200)), couldHaveBeen: String(out.couldHaveBeen).slice(0, 300), rule: String(out.rule).slice(0, 200) } };
+}
+
+const TASKS = { categorize, parse, checkin, chat, import: importTx, nudge, roast };
 
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");

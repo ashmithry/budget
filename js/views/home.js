@@ -1,8 +1,10 @@
 import { get, put, setSettings } from "../store.js";
 import { today, addDays, pretty, prettyIn, weekday } from "../dates.js";
-import { compute, categories, categoryMonth, catById, noSpendStreak, resisted, live, needsWorthCheck, weekReview, billsBetween, MOODS, round2 } from "../engine.js";
-import { esc, money, icon, plural, sheet, toast, haptic, tile, catTile, catLook, chip, nudge, emptyState, ic } from "../ui.js";
-import { openAdd, openAfford, skipItem } from "../sheets.js";
+import { compute, categoryStats, categories, categoryMonth, catById, noSpendStreak, resisted, live, needsWorthCheck, weekReview, billsBetween, MOODS, round2 } from "../engine.js";
+import { esc, money, icon, plural, sheet, toast, haptic, tile, catTile, catLook, chip, nudge, emptyState, ic, costFrame } from "../ui.js";
+import { openAdd, openAfford, skipItem, formSheet } from "../sheets.js";
+import { openAsk } from "./ask.js";
+import { openCooldown } from "../cooldown.js";
 
 const s = () => get();
 
@@ -53,8 +55,16 @@ function nudges(c) {
   else if (c.status === "over") out.push(nudge("bad", "trending-down", `Over today's limit by ${money(-c.leftToday)}`, `It's spread across the rest of the week: every day until ${pretty(c.end)} is now ${money(c.tomorrowDaily ?? 0)}. A no-spend day tomorrow gets you back on track.`));
   // 4. waitlist items ready to decide
   const ready = live(st.wish).filter((w) => w.status === "waiting" && w.unlockAt <= Date.now());
-  for (const w of ready.slice(0, 2)) out.push(nudge("warn", "hourglass", `Still want ${esc(w.name)}? (${money(w.price)})`, "Your waiting time is up. If you'd forgotten about it, that's your answer.", `<button class="btn sm good" data-act="wish-skip" data-id="${esc(w.id)}">Skip it</button><button class="btn sm ghost" data-act="wish-check" data-id="${esc(w.id)}">Check if I can</button><button class="btn sm ghost" data-act="wish-later" data-id="${esc(w.id)}">Wait longer</button>`));
-  // 5. "was it worth it?"
+  const cooling = live(st.wish).filter((w) => w.status === "waiting" && w.short && w.unlockAt > Date.now());
+  for (const w of cooling.slice(0, 2)) out.push(nudge("warn", "timer", `Cooling down: ${esc(w.name)} (${money(w.price)})`, `Unlocks at ${new Date(w.unlockAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}. Still want it then? Most cravings don't last that long.`, `<button class="btn sm good" data-act="wish-skip" data-id="${esc(w.id)}">Skip it</button><button class="btn sm ghost" data-act="cd-open" data-id="${esc(w.id)}">Open timer</button>`));
+  for (const w of ready.filter((x) => x.short).slice(0, 2)) out.push(nudge("warn", "timer", `Time's up: still want ${esc(w.name)}? (${money(w.price)})`, "If the craving's gone, that's your answer.", `<button class="btn sm good" data-act="wish-skip" data-id="${esc(w.id)}">Skip it</button><button class="btn sm ghost" data-act="cd-open" data-id="${esc(w.id)}">Decide</button>`));
+  for (const w of ready.filter((x) => !x.short).slice(0, 2)) out.push(nudge("warn", "hourglass", `Still want ${esc(w.name)}? (${money(w.price)})`, "Your waiting time is up. If you'd forgotten about it, that's your answer.", `<button class="btn sm good" data-act="wish-skip" data-id="${esc(w.id)}">Skip it</button><button class="btn sm ghost" data-act="wish-check" data-id="${esc(w.id)}">Check if I can</button><button class="btn sm ghost" data-act="wish-later" data-id="${esc(w.id)}">Wait longer</button>`));
+  // Where the everyday money went (imported history counts too)
+  const food = categoryStats(st, "food");
+  const coffee = categoryStats(st, "coffee");
+  const fc = round2(food.total + coffee.total);
+  if (fc >= 20 && st.settings.hideWaste !== today()) out.push(nudge("bad", "cup-soda", `${money(fc)} on food and coffee/boba in 30 days`, `${food.n + coffee.n} purchases${costFrame(fc) ? `, ${costFrame(fc)}` : ""}.${coffee.top && coffee.top[1] > 2 ? ` ${esc(coffee.top[0])}: ${coffee.top[1]} times.` : ""}${food.top && food.top[1] > 2 ? ` ${esc(food.top[0])}: ${food.top[1]} times.` : ""} Next craving, tap Can I afford it? and let the timer run.`, `<a class="btn sm primary" href="#/insights">See the damage</a><button class="btn sm ghost" data-act="hide-waste">Hide today</button>`));
+    // 5. "was it worth it?"
   for (const tx of needsWorthCheck(st).slice(0, 1)) out.push(nudge("info", "circle-help", `Was ${esc(tx.note || catById(st, tx.cat).name)} worth ${money(tx.amount)}?`, `${pretty(tx.date)}. Rating purchases shows you what you regret, so next time it's easier to skip.`, `<button class="btn sm ghost" data-act="worth" data-v="yes" data-id="${esc(tx.id)}">${ic("thumbs-up", { size: 16 })}Worth it</button><button class="btn sm ghost" data-act="worth" data-v="no" data-id="${esc(tx.id)}">${ic("thumbs-down", { size: 16 })}Regret it</button><button class="btn sm ghost" data-act="worth" data-v="skip" data-id="${esc(tx.id)}">Not sure</button>`));
   // 6. trials ending + bills in the next 3 days
   const soon = billsBetween(st, addDays(t, -1), addDays(t, 3)).filter((x) => x.date > t);
@@ -106,7 +116,7 @@ export function renderHome() {
   return `
   <header class="top">
     <div><h1>${greeting()}</h1><div class="sub">${pretty(t, { full: true })}</div></div>
-    <div class="row" style="gap:8px"><a class="icon-btn" href="#/automate" aria-label="Automations and widgets">${icon("bolt")}</a><a class="icon-btn" href="#/settings" aria-label="Settings">${icon("gear")}</a></div>
+    <div class="row" style="gap:8px"><button class="icon-btn" data-act="ask" aria-label="Ask Claude about your budget">${ic("message-circle", { size: 19 })}</button><a class="icon-btn" href="#/automate" aria-label="Automations and widgets">${icon("bolt")}</a><a class="icon-btn" href="#/settings" aria-label="Settings">${icon("gear")}</a></div>
   </header>
   <section class="hero ${c.status}" aria-live="polite">
     <div class="hero-top"><span class="label">${c.status === "short" ? (c.scheduled ? "Short before payday" : "Short for upcoming bills") : c.status === "over" ? "Over today's limit" : "Safe to spend today"}</span><span class="days">${daysTxt}</span></div>
@@ -116,6 +126,7 @@ export function renderHome() {
     <div class="facts">
       ${c.status === "short" ? "" : `<span><b class="num">${money(Math.max(c.pool, 0), { cents: false })}</b> ${c.scheduled ? `left until ${c.daysLeft > 1 ? pretty(addDays(c.end, 1)).replace(/^\w+, /, "") : "tomorrow"}` : `to last through ${pretty(c.end).replace(/^\w+, /, "")}`}</span>`}
       ${c.upcomingTotal > 0 ? `<span><b class="num">${money(c.upcomingTotal, { cents: false })}</b> in bills set aside</span>` : ""}
+      <button class="fact-btn" data-act="limit">${c.cap ? `Your limit <b class="num">${money(c.cap)}</b>/day${c.capped ? ` (math allows ${money(c.rawDaily)})` : ""}` : "Set a daily limit"}</button>
     </div>
   </section>
   <div class="actions">
@@ -155,6 +166,10 @@ export const homeActions = {
   "review-seen": (el) => setSettings({ reviewSeen: el.dataset.wk }),
   "hide-auto": () => setSettings({ hideAutoTip: true }),
   balance: () => import("../sheets.js").then((m) => m.openBalanceCheck()),
+  ask: () => openAsk(),
+  limit: () => openLimit(),
+  "cd-open": (el) => openCooldown(el.dataset.id),
+  "hide-waste": () => setSettings({ hideWaste: today() }),
 };
 
 // Go through auto-logged purchases: one tap per category, optional "why".
@@ -183,4 +198,30 @@ export function openReview() {
     el.querySelector("[data-del]").onclick = () => { put("tx", { id: tx.id, deleted: true }); sh.render(); };
   };
   sh.render();
+}
+
+
+// Your own daily limit: lower than the math, and the difference just stays in your account.
+export function openLimit() {
+  const c = compute(get());
+  const raw = c.rawDaily;
+  const ideas = [0.5, 0.65, 0.8].map((f) => Math.max(1, Math.floor(raw * f))).filter((v, i, a) => v > 0 && a.indexOf(v) === i);
+  formSheet({
+    title: "Daily limit",
+    note: `The math says <b>${money(raw)}</b> a day through ${pretty(c.end, { full: true })}. A lower limit means you spend less each day and the rest stays in your account. Leave it empty for no limit.`,
+    value: { dailyCap: c.cap || "" },
+    fields: [{ key: "dailyCap", label: "Spend at most per day", type: "money", placeholder: String(ideas[1] || "") }],
+    extra: `<div class="chips" style="margin:-4px 0 12px">${ideas.map((v) => `<button type="button" class="chip-btn" data-cap="${v}"><span>${money(v)}/day: keeps ${money(Math.max(0, (raw - v) * c.daysLeft), { cents: false })}</span></button>`).join("")}</div>
+      <button type="button" class="btn ghost block" data-askcap style="margin-bottom:12px">${ic("message-circle", { size: 18 })}Ask Claude what my limit should be</button>`,
+    onBind: (el) => {
+      el.querySelectorAll("[data-cap]").forEach((b) => (b.onclick = () => { el.querySelector('[data-f="dailyCap"]').value = b.dataset.cap; }));
+      el.querySelector("[data-askcap]").onclick = () => openAsk(`What daily limit should I set so I actually save money but don't run out before ${c.end}? Look at what I really spend on.`);
+    },
+    saveLabel: "Save limit",
+    onSave: (v) => {
+      const cap = Number(v.dailyCap) || 0;
+      setSettings({ dailyCap: cap > 0 ? cap : null });
+      toast(cap > 0 ? `Limit set: ${money(cap)} a day.` : "No daily limit.");
+    },
+  });
 }

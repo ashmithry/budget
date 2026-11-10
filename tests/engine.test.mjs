@@ -224,3 +224,22 @@ test("prices as days of budget unless paid hourly", () => {
   assert.equal(r.hours, null);
   assert.equal(r.budgetDays, 2);
 });
+
+test("daily cap: lower than the math wins, extra stays unspent; imported history never touches the balance", async () => {
+  const { categoryStats } = await import("../js/engine.js");
+  const t = "2026-11-10";
+  const s = base(t, { settings: { buffer: 20, lastUntil: "2026-12-19", dailyCap: 8, anchor: { amount: 500, date: t, ts: 0 } } });
+  let c = compute(s, t);
+  assert.equal(c.dailyBase, 8);
+  assert.equal(c.capped, true);
+  assert.equal(c.rawDaily, 12);
+  s.tx.push({ id: "old1", kind: "expense", amount: 7.5, note: "Boba Guys", cat: "coffee", date: "2026-11-01", ts: 1, imported: true });
+  s.tx.push({ id: "old2", kind: "expense", amount: 6.5, note: "Boba Guys", cat: "coffee", date: t, ts: 2, imported: true });
+  c = compute(s, t);
+  assert.equal(c.cash, 500);
+  assert.equal(c.spentToday, 0);
+  const st = categoryStats(s, "coffee", t);
+  assert.equal(st.n, 2);
+  assert.equal(st.total, 14);
+  assert.deepEqual(st.top, ["Boba Guys", 2]);
+});

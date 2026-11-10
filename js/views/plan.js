@@ -6,6 +6,7 @@ import { esc, money, toast, plural, costFrame, ic, tile, catTile, catLook } from
 // Older data stored an emoji; anything without an icon gets a sensible one.
 const goalIcon = (g) => g.icon || (g.type === "stretch" ? "layers" : "target");
 import { formSheet, openAfford, skipItem, openAdd } from "../sheets.js";
+import { pauseMinutes, DEFAULT_PAUSE } from "../cooldown.js";
 
 const s = () => get();
 const freqOptions = Object.entries(FREQS);
@@ -27,7 +28,12 @@ function budgets() {
   const bills = recurringMonthly(st);
   const goalsM = round2(live(st.goals).filter((g) => g.type !== "stretch").reduce((a, g) => a + (Number(g.perPay) || 0) * live(st.income).reduce((n, i) => n + (PER_MONTH[i.freq] || 0), 0), 0));
   const left = round2(inc - bills - goalsM - totalLimits);
+  const c = compute(st);
   return `
+  <div class="card nudge-card ${c.cap ? "ok" : "info"}"><div class="nudge"><span class="nic">${ic("gauge", { size: 18 })}</span><div class="grow">
+    <div class="t">${c.cap ? `Daily limit: ${money(c.cap)}` : "No daily limit set"}</div>
+    <div class="d">The math allows ${money(c.rawDaily)} a day through ${pretty(c.end, { full: true })}.${c.cap && c.capped ? ` Your limit keeps about ${money((c.rawDaily - c.cap) * c.daysLeft, { cents: false })} unspent by then.` : " A lower limit means more stays in your account."}</div>
+    <div class="btns"><button class="btn sm ${c.cap ? "ghost" : "primary"}" data-act="limit">${c.cap ? "Change limit" : "Set a daily limit"}</button></div></div></div></div>
   ${inc > 0 ? `<div class="card"><h2>Monthly plan</h2>
     <div class="row between"><span>Income</span><b class="num">${money(inc, { cents: false })}</b></div>
     <div class="row between muted"><span>Bills & subscriptions</span><span class="num">−${money(bills, { cents: false })}</span></div>
@@ -49,13 +55,14 @@ function editCat(id) {
   const c = id ? categories(s()).find((x) => x.id === id) : null;
   formSheet({
     title: c ? `Edit ${c.name}` : "New category",
-    value: c ? { ...c, icon: catLook(c).icon } : { icon: "package" },
+    value: c ? { ...c, icon: catLook(c).icon, pause: String(pauseMinutes(c.id)) } : { icon: "package", pause: "0" },
     fields: [
       { key: "name", label: "Name", required: true, max: 24 },
       { key: "icon", label: "Icon", type: "icon", options: CAT_ICONS },
       { key: "limit", label: "Monthly limit", type: "money", help: "Leave 0 for no limit" },
+      { key: "pause", label: "Cool-down before buying", type: "select", options: [["0", "None"], ["5", "5 minutes"], ["10", "10 minutes"], ["15", "15 minutes"], ["20", "20 minutes"], ["30", "30 minutes"]], help: "When you check a purchase in this category, you wait this long before you can buy it." },
     ],
-    onSave: (v) => { put("cats", { ...(c || {}), id: c?.id || uid(), name: v.name, icon: v.icon, color: c ? catLook(c).color : CAT_COLORS[categories(s()).length % CAT_COLORS.length], limit: Number(v.limit) || 0, order: c?.order ?? 99 }); },
+    onSave: (v) => { const cid = c?.id || uid(); setSettings({ pause: { ...(s().settings.pause || DEFAULT_PAUSE), [cid]: Number(v.pause) || 0 } }); put("cats", { ...(c || {}), id: cid, name: v.name, icon: v.icon, color: c ? catLook(c).color : CAT_COLORS[categories(s()).length % CAT_COLORS.length], limit: Number(v.limit) || 0, order: c?.order ?? 99 }); },
     onDelete: c && !["other", "bills", "subs"].includes(c.id) ? () => remove("cats", c.id) : null,
   });
 }
